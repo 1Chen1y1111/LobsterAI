@@ -4,6 +4,8 @@ const path = require("node:path");
 const fs = require("node:fs");
 const os = require("node:os");
 const APP_NAME = "LobsterAI";
+electron.app.name = APP_NAME;
+electron.app.setName(APP_NAME);
 const isDev = process.env.NODE_ENV === "development";
 process.platform === "linux";
 const isMac = process.platform === "darwin";

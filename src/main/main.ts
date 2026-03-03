@@ -4,6 +4,10 @@ import fs from "node:fs";
 import os from "node:os";
 import { APP_NAME } from "./appConstants";
 
+// 设置应用程序名称
+app.name = APP_NAME;
+app.setName(APP_NAME);
+
 // 🚧 Use ['ENV_NAME'] avoid vite:define plugin - Vite@2.x
 const isDev = process.env.NODE_ENV === "development";
 const isLinux = process.platform === "linux";
