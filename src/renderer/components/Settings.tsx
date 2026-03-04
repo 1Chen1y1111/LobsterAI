@@ -52,6 +52,7 @@ import {
   PasswordEncryptedPayload,
 } from "@/services/encryption";
 import { configService } from "@/services/config";
+import EmailSkillConfig from "./skills/EmailSkillConfig";
 
 type TabType =
   | "general"
@@ -2038,6 +2039,9 @@ const Settings: React.FC<SettingsProps> = ({ initialTab, notice, onClose }) => {
             </div>
           </div>
         );
+
+      case "email":
+        return <EmailSkillConfig />;
 
       default:
         return null;

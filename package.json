@@ -7,6 +7,8 @@
     "build": "tsc && vite build && electron-builder",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
+    "build:skill:email": "cd SKILLs/imap-smtp-email && pnpm install --production",
+    "build:skills": "pnpm run build:skill:email",
     "start:electron": "cross-env NODE_ENV=development ELECTRON_START_URL=http://localhost:5176 electron .",
     "electron:dev": "rimraf dist-electron && pnpm run compile:electron && concurrently \"vite --port 5176\" \"wait-on -v -t 120000 -d 10000 http://localhost:5176 && pnpm run start:electron\"",
     "compile:electron": "tsc --project electron-tsconfig.json"
@@ -14,12 +16,18 @@
   "dependencies": {
     "@heroicons/react": "^2.2.0",
     "@reduxjs/toolkit": "^2.11.2",
+    "@types/sql.js": "^1.4.9",
+    "extract-zip": "^2.0.1",
+    "js-yaml": "^4.1.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-redux": "^9.2.0"
+    "react-redux": "^9.2.0",
+    "sql.js": "^1.14.1"
   },
   "devDependencies": {
     "@tailwindcss/typography": "0.5.16",
+    "@types/extract-zip": "^2.0.3",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^25.3.3",
     "@types/react": "^18.2.64",
     "@types/react-dom": "^18.2.21",

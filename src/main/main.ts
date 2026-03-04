@@ -3,6 +3,8 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { APP_NAME } from "./appConstants";
+import { SkillManager } from "./skillManager";
+import { SqliteStore } from "./sqliteStore";
 
 // 设置应用程序名称
 app.name = APP_NAME;
@@ -39,11 +41,46 @@ let mainWindow: BrowserWindow | null = null;
 // 确保应用程序只有一个实例
 const gotTheLock = isDev ? true : app.requestSingleInstanceLock();
 
+let store: SqliteStore | null = null;
+let skillManager: SkillManager | null = null;
+let storeInitPromise: Promise<SqliteStore> | null = null;
+
+const initStore = async (): Promise<SqliteStore> => {
+  if (!storeInitPromise) {
+    if (!app.isReady()) {
+      throw new Error("Store accessed before app is ready.");
+    }
+    storeInitPromise = Promise.race([
+      SqliteStore.create(app.getPath("userData")),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("Store initialization timed out after 15s")),
+          15_000,
+        ),
+      ),
+    ]);
+  }
+  return storeInitPromise;
+};
+
+const getStore = (): SqliteStore => {
+  if (!store) {
+    throw new Error("Store not initialized. Call initStore() first.");
+  }
+  return store;
+};
+
+/* ------------------- Skills ------------------- */
+const getSkillManager = () => {
+  if (!skillManager) {
+    skillManager = new SkillManager(getStore);
+  }
+  return skillManager;
+};
+
 if (!gotTheLock) {
   app.quit();
 } else {
-  console.log(666);
-
   // Window control IPC handlers
   ipcMain.on("window-minimize", () => {
     mainWindow?.minimize();
@@ -64,6 +101,37 @@ if (!gotTheLock) {
   ipcMain.handle("window:isMaximized", () => {
     return mainWindow?.isMaximized() ?? false;
   });
+
+  /* ------------------- Skills IPC handlers ------------------- */
+  ipcMain.handle("skills:list", () => {
+    try {
+      const skills = getSkillManager().listSkills();
+      return { success: true, skills };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to load skills",
+      };
+    }
+  });
+
+  ipcMain.handle("skills:getConfig", (_event, skillId: string) => {
+    return getSkillManager().getSkillConfig(skillId);
+  });
+
+  ipcMain.handle(
+    "skills:setConfig",
+    (_event, skillId: string, config: Record<string, string>) => {
+      return getSkillManager().setSkillConfig(skillId, config);
+    },
+  );
+
+  ipcMain.handle(
+    "skills:testEmailConnectivity",
+    async (_event, skillId: string, config: Record<string, string>) => {
+      return getSkillManager().testEmailConnectivity(skillId, config);
+    },
+  );
 
   // API 代理处理程序 - 解决 CORS 问题
   ipcMain.handle(
@@ -281,6 +349,7 @@ if (!gotTheLock) {
 
   // 初始化应用
   const initApp = async () => {
+    console.log('app.getPath("userData")', app.getPath("userData"));
     console.log("[Main] initApp: waiting for app.whenReady()");
     await app.whenReady();
     console.log("[Main] initApp: app is ready");
@@ -296,6 +365,9 @@ if (!gotTheLock) {
     }
     console.log("[Main] initApp: default project dir ensured");
 
+    console.log("[Main] initApp: starting initStore()");
+
+    store = await initStore();
     console.log("[Main] initApp: store initialized");
 
     // 设置安全策略
