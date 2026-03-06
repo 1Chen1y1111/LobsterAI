@@ -302,6 +302,15 @@ if (!gotTheLock) {
     }
   )
 
+  ipcMain.handle('cowork:sandbox:install', async () => {
+    // const result = await ensureSandboxReady()
+    // return {
+    //   success: result.ok,
+    //   status: getSandboxStatus(),
+    //   error: result.ok ? undefined : 'error' in result ? result.error : undefined
+    // }
+  })
+
   app.on('second-instance', (_event, commandLine, workingDirectory) => {
     console.log('[Main] second-instance event', {
       commandLine,

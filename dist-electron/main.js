@@ -8038,6 +8038,8 @@ if (!gotTheLock) {
       }
     }
   );
+  electron.ipcMain.handle("cowork:sandbox:install", async () => {
+  });
   electron.app.on("second-instance", (_event, commandLine, workingDirectory) => {
     console.log("[Main] second-instance event", {
       commandLine,

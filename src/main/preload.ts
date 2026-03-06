@@ -108,6 +108,7 @@ contextBridge.exposeInMainWorld('electron', {
       includeDeleted?: boolean
       limit?: number
       offset?: number
-    }) => ipcRenderer.invoke('cowork:memory:listEntries', input)
+    }) => ipcRenderer.invoke('cowork:memory:listEntries', input),
+    installSandbox: () => ipcRenderer.invoke('cowork:sandbox:install')
   }
 })
