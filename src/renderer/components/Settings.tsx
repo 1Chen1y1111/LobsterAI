@@ -2662,7 +2662,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
                 </div>
 
                 {/* Models List */}
-                <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+                <div className="space-y-1.5 max-h-60 overflow-y-auto">
                   {providers[activeProvider].models?.map(model => (
                     <div
                       key={model.id}
