@@ -20,6 +20,11 @@
         "id": "feishu-openclaw-plugin",
         "npm": "@larksuiteoapi/feishu-openclaw-plugin",
         "version": "2026.3.8"
+      },
+      {
+        "id": "qqbot",
+        "npm": "@sliverp/qqbot",
+        "version": "1.5.3"
       }
     ]
   },

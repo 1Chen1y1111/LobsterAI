@@ -685,6 +685,13 @@ const getOpenClawConfigSync = (): OpenClawConfigSync => {
           return null;
         }
       },
+      getQQConfig: () => {
+        try {
+          return getIMGatewayManager().getConfig().qq;
+        } catch {
+          return null;
+        }
+      },
     });
   }
   return openClawConfigSync;
@@ -2228,6 +2235,10 @@ if (!gotTheLock) {
       // Re-sync OpenClaw config so feishu-openclaw-plugin picks up new credentials
       if (config.feishu) {
         void syncOpenClawConfig({ reason: 'im-feishu-config-change', restartGatewayIfRunning: false });
+      }
+      // Re-sync OpenClaw config so qqbot plugin picks up new credentials
+      if (config.qq) {
+        void syncOpenClawConfig({ reason: 'im-qq-config-change', restartGatewayIfRunning: false });
       }
       return { success: true };
     } catch (error) {

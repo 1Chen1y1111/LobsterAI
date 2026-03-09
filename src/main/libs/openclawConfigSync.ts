@@ -2,7 +2,7 @@ import { app } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import type { CoworkConfig, CoworkExecutionMode } from '../coworkStore';
-import type { DingTalkConfig, FeishuConfig } from '../im/types';
+import type { DingTalkConfig, FeishuConfig, QQConfig } from '../im/types';
 import { resolveRawApiConfig } from './claudeSettings';
 import type { OpenClawEngineManager } from './openclawEngineManager';
 
@@ -53,6 +53,7 @@ type OpenClawConfigSyncDeps = {
   getCoworkConfig: () => CoworkConfig;
   getDingTalkConfig: () => DingTalkConfig | null;
   getFeishuConfig: () => FeishuConfig | null;
+  getQQConfig: () => QQConfig | null;
 };
 
 export class OpenClawConfigSync {
@@ -60,12 +61,14 @@ export class OpenClawConfigSync {
   private readonly getCoworkConfig: () => CoworkConfig;
   private readonly getDingTalkConfig: () => DingTalkConfig | null;
   private readonly getFeishuConfig: () => FeishuConfig | null;
+  private readonly getQQConfig: () => QQConfig | null;
 
   constructor(deps: OpenClawConfigSyncDeps) {
     this.engineManager = deps.engineManager;
     this.getCoworkConfig = deps.getCoworkConfig;
     this.getDingTalkConfig = deps.getDingTalkConfig;
     this.getFeishuConfig = deps.getFeishuConfig;
+    this.getQQConfig = deps.getQQConfig;
   }
 
   sync(reason: string): OpenClawConfigSyncResult {
@@ -110,7 +113,10 @@ export class OpenClawConfigSync {
     const feishuConfig = this.getFeishuConfig();
     const hasFeishu = feishuConfig?.enabled && feishuConfig.appId;
 
-    const hasAnyChannel = hasDingTalk || hasFeishu;
+    const qqConfig = this.getQQConfig();
+    const hasQQ = qqConfig?.enabled && qqConfig.appId;
+
+    const hasAnyChannel = hasDingTalk || hasFeishu || hasQQ;
 
     const managedConfig: Record<string, unknown> = {
       gateway: {
@@ -184,6 +190,13 @@ export class OpenClawConfigSync {
               domain: feishuConfig.domain || 'feishu',
             },
           } : {}),
+          ...(hasQQ ? {
+            qqbot: {
+              enabled: true,
+              appId: qqConfig.appId,
+              clientSecret: qqConfig.appSecret,
+            },
+          } : {}),
         },
       } : hasFeishu ? {
         channels: {
@@ -192,6 +205,21 @@ export class OpenClawConfigSync {
             appId: feishuConfig.appId,
             appSecret: feishuConfig.appSecret,
             domain: feishuConfig.domain || 'feishu',
+          },
+          ...(hasQQ ? {
+            qqbot: {
+              enabled: true,
+              appId: qqConfig.appId,
+              clientSecret: qqConfig.appSecret,
+            },
+          } : {}),
+        },
+      } : hasQQ ? {
+        channels: {
+          qqbot: {
+            enabled: true,
+            appId: qqConfig.appId,
+            clientSecret: qqConfig.appSecret,
           },
         },
       } : {}),
