@@ -14,10 +14,7 @@ interface IElectronAPI {
   }
   skills: {
     list: () => Promise<{ success: boolean; skills?: Skill[]; error?: string }>
-    setEnabled: (options: {
-      id: string
-      enabled: boolean
-    }) => Promise<{ success: boolean; skills?: Skill[]; error?: string }>
+    setEnabled: (options: { id: string; enabled: boolean }) => Promise<{ success: boolean; skills?: Skill[]; error?: string }>
     delete: (id: string) => Promise<{ success: boolean; skills?: Skill[]; error?: string }>
     download: (source: string) => Promise<{ success: boolean; skills?: Skill[]; error?: string }>
     getRoot: () => Promise<{ success: boolean; path?: string; error?: string }>
@@ -31,10 +28,7 @@ interface IElectronAPI {
       config?: Record<string, string>
       error?: string
     }>
-    setConfig: (
-      skillId: string,
-      config: Record<string, string>
-    ) => Promise<{ success: boolean; error?: string }>
+    setConfig: (skillId: string, config: Record<string, string>) => Promise<{ success: boolean; error?: string }>
     testEmailConnectivity: (
       skillId: string,
       config: Record<string, string>
@@ -46,12 +40,7 @@ interface IElectronAPI {
     onChanged: (callback: () => void) => () => void
   }
   api: {
-    fetch: (options: {
-      url: string
-      method: string
-      headers: Record<string, string>
-      body?: string
-    }) => Promise<ApiResponse>
+    fetch: (options: { url: string; method: string; headers: Record<string, string>; body?: string }) => Promise<ApiResponse>
     stream: (options: {
       url: string
       method: string
@@ -95,6 +84,8 @@ interface IElectronAPI {
       limit?: number
       offset?: number
     }) => Promise<{ success: boolean; entries?: CoworkUserMemoryEntry[]; error?: string }>
+    getSandboxStatus: () => Promise<CoworkSandboxStatus>
+    installSandbox: () => Promise<{ success: boolean; status: CoworkSandboxStatus; error?: string }>
   }
   appInfo: {
     getVersion: () => Promise<string>

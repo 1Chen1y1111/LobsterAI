@@ -19,6 +19,7 @@ const require$$4 = require("events");
 const crypto = require("crypto");
 const initSqlJs = require("sql.js");
 const node_crypto = require("node:crypto");
+const promises = require("stream/promises");
 const APP_NAME = "CyLobsterAI";
 const DB_FILENAME = "cylobsterai.sqlite";
 /*! js-yaml 4.1.1 https://github.com/nodeca/js-yaml @license MIT */
@@ -5066,7 +5067,7 @@ class Extractor {
     return mode;
   }
 }
-var extractZip$1 = async function(zipPath, opts) {
+var extractZip = async function(zipPath, opts) {
   debug("creating target directory", opts.dir);
   if (!path.isAbsolute(opts.dir)) {
     throw new Error("Target directory is expected to be absolute");
@@ -5075,7 +5076,7 @@ var extractZip$1 = async function(zipPath, opts) {
   opts.dir = await fs.realpath(opts.dir);
   return new Extractor(zipPath, opts).extract();
 };
-const extractZip = /* @__PURE__ */ getDefaultExportFromCjs(extractZip$1);
+const extractZip$1 = /* @__PURE__ */ getDefaultExportFromCjs(extractZip);
 function cpRecursiveSync(src2, dest, opts = {}) {
   const { dereference = false, force = false } = opts;
   const stat = dereference ? fs$4.statSync(src2) : fs$4.lstatSync(src2);
@@ -5748,7 +5749,7 @@ const downloadGithubArchive = async (source, tempRoot, ref) => {
   const extractRoot = path$1.join(tempRoot, "github-archive");
   fs$4.writeFileSync(zipPath, buffer);
   fs$4.mkdirSync(extractRoot, { recursive: true });
-  await extractZip(zipPath, { dir: extractRoot });
+  await extractZip$1(zipPath, { dir: extractRoot });
   const extractedDirs = fs$4.readdirSync(extractRoot).map((entry) => path$1.join(extractRoot, entry)).filter((entryPath) => {
     try {
       return fs$4.statSync(entryPath).isDirectory();
@@ -5784,7 +5785,7 @@ const downloadZipUrl = async (zipUrl, tempRoot) => {
   const extractRoot = path$1.join(tempRoot, "remote-skill");
   fs$4.writeFileSync(zipPath, buffer);
   fs$4.mkdirSync(extractRoot, { recursive: true });
-  await extractZip(zipPath, { dir: extractRoot });
+  await extractZip$1(zipPath, { dir: extractRoot });
   const extractedDirs = fs$4.readdirSync(extractRoot).map((entry) => path$1.join(extractRoot, entry)).filter((entryPath) => {
     try {
       return fs$4.statSync(entryPath).isDirectory();
@@ -6161,7 +6162,7 @@ class SkillManager {
             const tempRoot = fs$4.mkdtempSync(
               path$1.join(electron.app.getPath("temp"), "lobsterai-skill-zip-")
             );
-            await extractZip(localSource, { dir: tempRoot });
+            await extractZip$1(localSource, { dir: tempRoot });
             localSource = tempRoot;
             cleanupPath = tempRoot;
           } else if (path$1.basename(localSource) === SKILL_FILE_NAME) {
@@ -7821,6 +7822,863 @@ class CoworkStore {
     return deleted;
   }
 }
+const MAX_LOG_SIZE = 5 * 1024 * 1024;
+let logFilePath = null;
+function getLogFilePath() {
+  if (!logFilePath) {
+    const logDir = path$1.join(electron.app.getPath("userData"), "logs");
+    if (!fs$4.existsSync(logDir)) {
+      fs$4.mkdirSync(logDir, { recursive: true });
+    }
+    logFilePath = path$1.join(logDir, "cowork.log");
+  }
+  return logFilePath;
+}
+function rotateIfNeeded() {
+  try {
+    const filePath = getLogFilePath();
+    if (!fs$4.existsSync(filePath)) return;
+    const stat = fs$4.statSync(filePath);
+    if (stat.size > MAX_LOG_SIZE) {
+      const backupPath = filePath + ".old";
+      if (fs$4.existsSync(backupPath)) {
+        fs$4.unlinkSync(backupPath);
+      }
+      fs$4.renameSync(filePath, backupPath);
+    }
+  } catch {
+  }
+}
+function formatTimestamp() {
+  return (/* @__PURE__ */ new Date()).toISOString();
+}
+function coworkLog(level, tag, message, extra) {
+  try {
+    rotateIfNeeded();
+    const parts = [`[${formatTimestamp()}] [${level}] [${tag}] ${message}`];
+    if (extra) {
+      for (const [key, value] of Object.entries(extra)) {
+        const serialized = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+        parts.push(`  ${key}: ${serialized}`);
+      }
+    }
+    parts.push("");
+    fs$4.appendFileSync(getLogFilePath(), parts.join("\n"), "utf-8");
+  } catch {
+  }
+}
+const SANDBOX_BASE_URL = process.env.COWORK_SANDBOX_BASE_URL || "";
+const SANDBOX_RUNTIME_VERSION = process.env.COWORK_SANDBOX_RUNTIME_VERSION || "v0.1.3";
+const SANDBOX_IMAGE_VERSION = process.env.COWORK_SANDBOX_IMAGE_VERSION || "v0.1.4";
+const SANDBOX_RUNTIME_URL = process.env.COWORK_SANDBOX_RUNTIME_URL;
+const SANDBOX_IMAGE_URL = process.env.COWORK_SANDBOX_IMAGE_URL;
+const SANDBOX_IMAGE_URL_ARM64 = process.env.COWORK_SANDBOX_IMAGE_URL_ARM64;
+const SANDBOX_IMAGE_URL_AMD64 = process.env.COWORK_SANDBOX_IMAGE_URL_AMD64;
+const SANDBOX_KERNEL_URL = process.env.COWORK_SANDBOX_KERNEL_URL;
+const SANDBOX_KERNEL_URL_ARM64 = process.env.COWORK_SANDBOX_KERNEL_URL_ARM64;
+const SANDBOX_KERNEL_URL_AMD64 = process.env.COWORK_SANDBOX_KERNEL_URL_AMD64;
+const SANDBOX_INITRD_URL = process.env.COWORK_SANDBOX_INITRD_URL;
+const SANDBOX_INITRD_URL_ARM64 = process.env.COWORK_SANDBOX_INITRD_URL_ARM64;
+const SANDBOX_INITRD_URL_AMD64 = process.env.COWORK_SANDBOX_INITRD_URL_AMD64;
+const SANDBOX_KERNEL_PATH = process.env.COWORK_SANDBOX_KERNEL_PATH;
+const SANDBOX_KERNEL_PATH_ARM64 = process.env.COWORK_SANDBOX_KERNEL_PATH_ARM64;
+const SANDBOX_KERNEL_PATH_AMD64 = process.env.COWORK_SANDBOX_KERNEL_PATH_AMD64;
+const SANDBOX_INITRD_PATH = process.env.COWORK_SANDBOX_INITRD_PATH;
+const SANDBOX_INITRD_PATH_ARM64 = process.env.COWORK_SANDBOX_INITRD_PATH_ARM64;
+const SANDBOX_INITRD_PATH_AMD64 = process.env.COWORK_SANDBOX_INITRD_PATH_AMD64;
+const SANDBOX_RUNTIME_SHA256 = process.env.COWORK_SANDBOX_RUNTIME_SHA256;
+const SANDBOX_IMAGE_SHA256 = process.env.COWORK_SANDBOX_IMAGE_SHA256;
+const SANDBOX_IMAGE_SHA256_ARM64 = process.env.COWORK_SANDBOX_IMAGE_SHA256_ARM64;
+const SANDBOX_IMAGE_SHA256_AMD64 = process.env.COWORK_SANDBOX_IMAGE_SHA256_AMD64;
+const DEFAULT_SANDBOX_RUNTIME_URL_DARWIN_ARM64 = "https://ydhardwarecommon.nosdn.127.net/f23e57c47e4356c31b5bf1012f10a53e.gz";
+const DEFAULT_SANDBOX_RUNTIME_URL_DARWIN_AMD64 = "https://ydhardwarecommon.nosdn.127.net/20a9f6a34705ca51dbd9fb8c7695c1e5.gz";
+const DEFAULT_SANDBOX_RUNTIME_URL_WIN32_AMD64 = "https://ydhardwarecommon.nosdn.127.net/02a016878c4457bd819e11e55b7b6884.gz";
+const DEFAULT_SANDBOX_IMAGE_URL_ARM64 = "https://ydhardwarecommon.nosdn.127.net/59d9df60ce9c0463c54e3043af60cb10.qcow2";
+const DEFAULT_SANDBOX_IMAGE_URL_AMD64 = "https://ydhardwarebusiness.nosdn.127.net/3ba0e509b60aaf8b5a969618d1b4e170.qcow2";
+const downloadState = {
+  runtime: null,
+  image: null,
+  progress: void 0,
+  error: null
+};
+let _resolvedSystemQemuPath = null;
+const sandboxEvents = new require$$4.EventEmitter();
+function emitProgress(progress) {
+  downloadState.progress = progress;
+  sandboxEvents.emit("progress", progress);
+}
+function getPlatformKey() {
+  if (!["darwin", "win32", "linux"].includes(process.platform)) {
+    return null;
+  }
+  if (!["x64", "arm64"].includes(process.arch)) {
+    return null;
+  }
+  return `${process.platform}-${process.arch}`;
+}
+function getRuntimeBinaryName() {
+  const isWindows2 = process.platform === "win32";
+  if (process.arch === "arm64") {
+    return isWindows2 ? "qemu-system-aarch64.exe" : "qemu-system-aarch64";
+  }
+  return isWindows2 ? "qemu-system-x86_64.exe" : "qemu-system-x86_64";
+}
+function getSandboxPaths() {
+  const baseDir = path$1.join(electron.app.getPath("userData"), "cowork", "sandbox");
+  const runtimeDir = path$1.join(baseDir, "runtime", `${SANDBOX_RUNTIME_VERSION}`);
+  const imageDir = path$1.join(baseDir, "images", `${SANDBOX_IMAGE_VERSION}`);
+  const runtimeBinary = path$1.join(runtimeDir, getRuntimeBinaryName());
+  const imagePath = path$1.join(imageDir, `linux-${process.arch}.qcow2`);
+  return { baseDir, runtimeDir, imageDir, runtimeBinary, imagePath };
+}
+function getRuntimeUrl(platformKey) {
+  if (SANDBOX_RUNTIME_URL) {
+    return SANDBOX_RUNTIME_URL;
+  }
+  if (platformKey === "darwin-arm64" && DEFAULT_SANDBOX_RUNTIME_URL_DARWIN_ARM64) {
+    return DEFAULT_SANDBOX_RUNTIME_URL_DARWIN_ARM64;
+  }
+  if (platformKey === "darwin-x64" && DEFAULT_SANDBOX_RUNTIME_URL_DARWIN_AMD64) {
+    return DEFAULT_SANDBOX_RUNTIME_URL_DARWIN_AMD64;
+  }
+  if (platformKey === "win32-x64" && DEFAULT_SANDBOX_RUNTIME_URL_WIN32_AMD64) {
+    return DEFAULT_SANDBOX_RUNTIME_URL_WIN32_AMD64;
+  }
+  if (platformKey.startsWith("win32")) {
+    return null;
+  }
+  if (!SANDBOX_BASE_URL) {
+    return null;
+  }
+  return `${SANDBOX_BASE_URL}/${SANDBOX_RUNTIME_VERSION}/runtime-${platformKey}.tar.gz`;
+}
+function getArchVariant() {
+  if (process.arch === "x64") {
+    return "amd64";
+  }
+  if (process.arch === "arm64") {
+    return "arm64";
+  }
+  return null;
+}
+function getImageUrl() {
+  const archVariant = getArchVariant();
+  if (archVariant === "arm64" && (SANDBOX_IMAGE_URL_ARM64 || DEFAULT_SANDBOX_IMAGE_URL_ARM64)) {
+    return SANDBOX_IMAGE_URL_ARM64 || DEFAULT_SANDBOX_IMAGE_URL_ARM64;
+  }
+  if (archVariant === "amd64" && (SANDBOX_IMAGE_URL_AMD64 || DEFAULT_SANDBOX_IMAGE_URL_AMD64)) {
+    return SANDBOX_IMAGE_URL_AMD64 || DEFAULT_SANDBOX_IMAGE_URL_AMD64;
+  }
+  if (SANDBOX_IMAGE_URL) {
+    return SANDBOX_IMAGE_URL;
+  }
+  if (!SANDBOX_BASE_URL) {
+    return null;
+  }
+  return `${SANDBOX_BASE_URL}/${SANDBOX_IMAGE_VERSION}/image-linux-${process.arch}.qcow2`;
+}
+function getImageSha256() {
+  const archVariant = getArchVariant();
+  if (archVariant === "arm64" && SANDBOX_IMAGE_SHA256_ARM64) {
+    return SANDBOX_IMAGE_SHA256_ARM64;
+  }
+  if (archVariant === "amd64" && SANDBOX_IMAGE_SHA256_AMD64) {
+    return SANDBOX_IMAGE_SHA256_AMD64;
+  }
+  return SANDBOX_IMAGE_SHA256 || null;
+}
+function getKernelUrl() {
+  const archVariant = getArchVariant();
+  if (archVariant === "arm64" && SANDBOX_KERNEL_URL_ARM64) {
+    return SANDBOX_KERNEL_URL_ARM64;
+  }
+  if (archVariant === "amd64" && SANDBOX_KERNEL_URL_AMD64) {
+    return SANDBOX_KERNEL_URL_AMD64;
+  }
+  return SANDBOX_KERNEL_URL || null;
+}
+function getInitrdUrl() {
+  const archVariant = getArchVariant();
+  if (archVariant === "arm64" && SANDBOX_INITRD_URL_ARM64) {
+    return SANDBOX_INITRD_URL_ARM64;
+  }
+  if (archVariant === "amd64" && SANDBOX_INITRD_URL_AMD64) {
+    return SANDBOX_INITRD_URL_AMD64;
+  }
+  return SANDBOX_INITRD_URL || null;
+}
+function getKernelPathOverride() {
+  const archVariant = getArchVariant();
+  if (archVariant === "arm64" && SANDBOX_KERNEL_PATH_ARM64) {
+    return SANDBOX_KERNEL_PATH_ARM64;
+  }
+  if (archVariant === "amd64" && SANDBOX_KERNEL_PATH_AMD64) {
+    return SANDBOX_KERNEL_PATH_AMD64;
+  }
+  return SANDBOX_KERNEL_PATH || null;
+}
+function getInitrdPathOverride() {
+  const archVariant = getArchVariant();
+  if (archVariant === "arm64" && SANDBOX_INITRD_PATH_ARM64) {
+    return SANDBOX_INITRD_PATH_ARM64;
+  }
+  if (archVariant === "amd64" && SANDBOX_INITRD_PATH_AMD64) {
+    return SANDBOX_INITRD_PATH_AMD64;
+  }
+  return SANDBOX_INITRD_PATH || null;
+}
+async function downloadFile(url, destination, stage) {
+  const response = await electron.session.defaultSession.fetch(url);
+  if (!response.ok) {
+    throw new Error(`Download failed (${response.status}): ${url}`);
+  }
+  await fs$4.promises.mkdir(path$1.dirname(destination), { recursive: true });
+  if (!response.body) {
+    const data = Buffer.from(await response.arrayBuffer());
+    await fs$4.promises.writeFile(destination, data);
+    emitProgress({
+      stage,
+      received: data.length,
+      total: data.length,
+      percent: 1,
+      url
+    });
+    return;
+  }
+  const totalHeader = response.headers.get("content-length");
+  const total = totalHeader ? Number(totalHeader) : void 0;
+  let received = 0;
+  emitProgress({
+    stage,
+    received,
+    total: total && Number.isFinite(total) ? total : void 0,
+    percent: total && Number.isFinite(total) ? 0 : void 0,
+    url
+  });
+  const nodeStream = require$$6.Readable.fromWeb(response.body);
+  nodeStream.on("data", (chunk) => {
+    received += chunk.length;
+    emitProgress({
+      stage,
+      received,
+      total: total && Number.isFinite(total) ? total : void 0,
+      percent: total && Number.isFinite(total) ? received / total : void 0,
+      url
+    });
+  });
+  await promises.pipeline(nodeStream, fs$4.createWriteStream(destination));
+  emitProgress({
+    stage,
+    received,
+    total: total && Number.isFinite(total) ? total : void 0,
+    percent: total && Number.isFinite(total) ? 1 : void 0,
+    url
+  });
+}
+async function sha256File(filePath) {
+  const hash = crypto.createHash("sha256");
+  const stream2 = fs$4.createReadStream(filePath);
+  await new Promise((resolve, reject) => {
+    stream2.on("data", (chunk) => hash.update(chunk));
+    stream2.on("end", () => resolve());
+    stream2.on("error", reject);
+  });
+  return hash.digest("hex");
+}
+async function verifySha256(filePath, expected) {
+  if (!expected) return;
+  const actual = await sha256File(filePath);
+  if (actual.toLowerCase() !== expected.toLowerCase()) {
+    throw new Error(`Checksum mismatch for ${path$1.basename(filePath)}`);
+  }
+}
+function extractTarArchive(archivePath, destDir) {
+  var _a;
+  const result = child_process.spawnSync("tar", ["-xf", archivePath, "-C", destDir], { stdio: "pipe" });
+  if (result.status !== 0) {
+    throw new Error(((_a = result.stderr) == null ? void 0 : _a.toString()) || "Failed to extract tar archive");
+  }
+}
+function extractArchive(archivePath, destDir) {
+  var _a, _b, _c;
+  if (archivePath.endsWith(".zip")) {
+    if (process.platform === "win32") {
+      const result = child_process.spawnSync("powershell", ["-NoProfile", "-Command", `Expand-Archive -Force "${archivePath}" "${destDir}"`], {
+        stdio: "pipe"
+      });
+      if (result.status !== 0) {
+        throw new Error(((_a = result.stderr) == null ? void 0 : _a.toString()) || "Failed to extract zip archive");
+      }
+    } else {
+      const result = child_process.spawnSync("unzip", ["-q", archivePath, "-d", destDir], { stdio: "pipe" });
+      if (result.status !== 0) {
+        throw new Error(((_b = result.stderr) == null ? void 0 : _b.toString()) || "Failed to extract zip archive");
+      }
+    }
+    return;
+  }
+  if (archivePath.endsWith(".tar")) {
+    extractTarArchive(archivePath, destDir);
+    return;
+  }
+  if (archivePath.endsWith(".tar.gz") || archivePath.endsWith(".tgz")) {
+    const result = child_process.spawnSync("tar", ["-xzf", archivePath, "-C", destDir], { stdio: "pipe" });
+    if (result.status !== 0) {
+      throw new Error(((_c = result.stderr) == null ? void 0 : _c.toString()) || "Failed to extract tar archive");
+    }
+    return;
+  }
+  throw new Error("Unsupported runtime archive format");
+}
+async function extractGzipBinary(archivePath, targetPath) {
+  await promises.pipeline(fs$4.createReadStream(archivePath), require$$1$2.createGunzip(), fs$4.createWriteStream(targetPath));
+}
+async function isTarFile(filePath) {
+  try {
+    const handle = await fs$4.promises.open(filePath, "r");
+    const buffer = Buffer.alloc(262);
+    await handle.read(buffer, 0, 262, 0);
+    await handle.close();
+    const magic = buffer.subarray(257, 262).toString("utf8");
+    return magic === "ustar";
+  } catch (error) {
+    console.warn("Failed to probe sandbox runtime archive:", error);
+    return false;
+  }
+}
+async function isGzipFile(filePath) {
+  try {
+    const handle = await fs$4.promises.open(filePath, "r");
+    const buffer = Buffer.alloc(2);
+    await handle.read(buffer, 0, 2, 0);
+    await handle.close();
+    return buffer[0] === 31 && buffer[1] === 139;
+  } catch (error) {
+    console.warn("Failed to probe sandbox runtime binary:", error);
+    return false;
+  }
+}
+async function isPEFile(filePath) {
+  try {
+    const handle = await fs$4.promises.open(filePath, "r");
+    const buffer = Buffer.alloc(2);
+    await handle.read(buffer, 0, 2, 0);
+    await handle.close();
+    return buffer[0] === 77 && buffer[1] === 90;
+  } catch (error) {
+    console.warn("Failed to probe file for PE header:", error);
+    return false;
+  }
+}
+async function runNsisInstaller(installerPath, targetDir) {
+  var _a;
+  await fs$4.promises.mkdir(targetDir, { recursive: true });
+  console.log(`[Sandbox] Launching QEMU installer interactively: ${installerPath}`);
+  console.log(`[Sandbox] Suggested install directory: ${targetDir}`);
+  const result = child_process.spawnSync(
+    "powershell.exe",
+    ["-NoProfile", "-Command", `Start-Process -FilePath '${installerPath}' -ArgumentList '/D=${targetDir}' -Wait`],
+    { stdio: "pipe", timeout: 6e5 }
+  );
+  if (result.error) {
+    throw new Error(`Failed to launch installer: ${result.error.message}`);
+  }
+  if (result.status !== 0) {
+    const stderr = ((_a = result.stderr) == null ? void 0 : _a.toString().trim()) || "";
+    throw new Error(
+      `Installer failed (exit code ${result.status}): ${stderr || "User may have cancelled the installation or denied elevation."}`
+    );
+  }
+  console.log("[Sandbox] QEMU installer process completed");
+}
+function resolveRuntimeBinary(runtimeDir, expectedPath) {
+  if (fs$4.existsSync(expectedPath)) {
+    return expectedPath;
+  }
+  if (!fs$4.existsSync(runtimeDir)) {
+    return null;
+  }
+  const targetName = path$1.basename(expectedPath);
+  const stack = [runtimeDir];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) continue;
+    const entries = fs$4.readdirSync(current, { withFileTypes: true });
+    for (const entry of entries) {
+      const entryPath = path$1.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(entryPath);
+      } else if (entry.isFile() && entry.name === targetName) {
+        return entryPath;
+      }
+    }
+  }
+  return null;
+}
+function findSystemQemu() {
+  if (process.platform !== "win32") {
+    return null;
+  }
+  const qemuName = getRuntimeBinaryName();
+  const result = child_process.spawnSync("where", [qemuName], { stdio: "pipe" });
+  if (result.status === 0 && result.stdout) {
+    const paths = result.stdout.toString().trim().split("\n");
+    for (const qemuPath of paths) {
+      const trimmedPath = qemuPath.trim();
+      if (fs$4.existsSync(trimmedPath)) {
+        const testResult = child_process.spawnSync(trimmedPath, ["--version"], { stdio: "pipe", timeout: 5e3 });
+        if (testResult.status === 0 || testResult.status === 3221225781) {
+          return trimmedPath;
+        }
+      }
+    }
+  }
+  const commonPaths = [
+    "C:\\Program Files\\qemu",
+    "C:\\Program Files (x86)\\qemu",
+    path$1.join(process.env.LOCALAPPDATA || "", "Programs", "qemu")
+  ];
+  for (const basePath of commonPaths) {
+    const qemuPath = path$1.join(basePath, qemuName);
+    if (fs$4.existsSync(qemuPath)) {
+      return qemuPath;
+    }
+  }
+  return null;
+}
+function validateQemuBinary(binaryPath) {
+  var _a;
+  if (!fs$4.existsSync(binaryPath)) {
+    return { valid: false, error: "Binary not found" };
+  }
+  const result = child_process.spawnSync(binaryPath, ["--version"], { stdio: "pipe", timeout: 5e3 });
+  if (result.status === 0) {
+    return { valid: true };
+  }
+  if (result.status === 3221225781) {
+    return {
+      valid: false,
+      error: "QEMU binary is missing required DLL files. Please install QEMU properly or use a complete QEMU package."
+    };
+  }
+  if (result.status !== null && result.status !== 0) {
+    return {
+      valid: false,
+      error: `QEMU binary failed to run (exit code: ${result.status}). ${((_a = result.stderr) == null ? void 0 : _a.toString()) || ""}`.trim()
+    };
+  }
+  if (result.error) {
+    return {
+      valid: false,
+      error: `Failed to run QEMU: ${result.error.message}`
+    };
+  }
+  return { valid: false, error: "Unknown error validating QEMU binary" };
+}
+function checkQemuVirtfsSupport(binaryPath) {
+  if (process.platform === "win32") {
+    return true;
+  }
+  const result = child_process.spawnSync(binaryPath, ["-help"], { stdio: "pipe", timeout: 5e3 });
+  if (result.status === 0 && result.stdout) {
+    return result.stdout.toString().includes("-virtfs");
+  }
+  return false;
+}
+function hasHypervisorEntitlement(output) {
+  return output.includes("com.apple.security.hypervisor");
+}
+function ensureHypervisorEntitlement(binaryPath, runtimeDir) {
+  var _a, _b, _c, _d;
+  if (process.platform !== "darwin") return;
+  const probe = child_process.spawnSync("codesign", ["-d", "--entitlements", ":-", binaryPath], { stdio: "pipe" });
+  if (probe.status === 0) {
+    const stdout = ((_a = probe.stdout) == null ? void 0 : _a.toString()) || "";
+    const stderr = ((_b = probe.stderr) == null ? void 0 : _b.toString()) || "";
+    if (hasHypervisorEntitlement(stdout) || hasHypervisorEntitlement(stderr)) {
+      return;
+    }
+  }
+  const entitlementsPath = path$1.join(runtimeDir, "entitlements.hypervisor.plist");
+  const entitlements = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    '<plist version="1.0">',
+    "<dict>",
+    "  <key>com.apple.security.hypervisor</key>",
+    "  <true/>",
+    "</dict>",
+    "</plist>",
+    ""
+  ].join("\n");
+  try {
+    fs$4.writeFileSync(entitlementsPath, entitlements);
+  } catch (error) {
+    console.warn("Failed to write hypervisor entitlements file:", error);
+    return;
+  }
+  const sign = child_process.spawnSync("codesign", ["-s", "-", "--force", "--entitlements", entitlementsPath, binaryPath], { stdio: "pipe" });
+  if (sign.status !== 0) {
+    const stderr = ((_c = sign.stderr) == null ? void 0 : _c.toString()) || ((_d = sign.stdout) == null ? void 0 : _d.toString()) || "Unknown codesign error";
+    console.warn("Failed to codesign sandbox runtime for HVF:", stderr.trim());
+  }
+}
+async function ensureRuntime() {
+  var _a;
+  const platformKey = getPlatformKey();
+  if (!platformKey) {
+    throw new Error("Sandbox VM is not supported on this platform.");
+  }
+  const { runtimeDir, runtimeBinary } = getSandboxPaths();
+  const resolvedBinary = resolveRuntimeBinary(runtimeDir, runtimeBinary);
+  if (resolvedBinary) {
+    if (await isGzipFile(resolvedBinary)) {
+      const tempPath = `${resolvedBinary}.tmp`;
+      await extractGzipBinary(resolvedBinary, tempPath);
+      if (await isTarFile(tempPath)) {
+        extractTarArchive(tempPath, runtimeDir);
+        await fs$4.promises.unlink(tempPath);
+        try {
+          await fs$4.promises.unlink(resolvedBinary);
+        } catch (error) {
+          console.warn("Failed to remove sandbox runtime gzip archive:", error);
+        }
+      } else {
+        await fs$4.promises.rename(tempPath, resolvedBinary);
+      }
+    } else if (await isTarFile(resolvedBinary)) {
+      extractTarArchive(resolvedBinary, runtimeDir);
+      try {
+        await fs$4.promises.unlink(resolvedBinary);
+      } catch (error) {
+        console.warn("Failed to remove sandbox runtime tar archive:", error);
+      }
+    }
+    const finalResolved = resolveRuntimeBinary(runtimeDir, runtimeBinary);
+    if (!finalResolved) {
+      throw new Error("Sandbox runtime binary not found after extraction.");
+    }
+    const validation2 = validateQemuBinary(finalResolved);
+    if (!validation2.valid) {
+      console.warn(`[Sandbox] QEMU binary validation warning: ${validation2.error}`);
+    }
+    if (process.platform !== "win32") {
+      try {
+        fs$4.chmodSync(finalResolved, 493);
+      } catch (error) {
+        console.warn("Failed to chmod sandbox runtime binary:", error);
+      }
+    }
+    ensureHypervisorEntitlement(finalResolved, runtimeDir);
+    return finalResolved;
+  }
+  if (process.platform === "win32") {
+    const systemQemu = findSystemQemu();
+    if (systemQemu) {
+      console.log(`[Sandbox] Found system QEMU at: ${systemQemu}`);
+      const validation2 = validateQemuBinary(systemQemu);
+      if (validation2.valid) {
+        if (checkQemuVirtfsSupport(systemQemu)) {
+          console.log("[Sandbox] Using system QEMU installation");
+          _resolvedSystemQemuPath = systemQemu;
+          return systemQemu;
+        }
+        console.warn("[Sandbox] System QEMU lacks virtfs (9p) support, will download a compatible build");
+      } else {
+        console.warn(`[Sandbox] System QEMU found but invalid: ${validation2.error}`);
+      }
+    }
+  }
+  const url = getRuntimeUrl(platformKey);
+  if (!url) {
+    let errorMsg;
+    if (platformKey === "win32-x64" || platformKey === "win32-arm64") {
+      errorMsg = [
+        "Windows sandbox requires QEMU to be installed.",
+        "",
+        "Please install QEMU using one of these methods:",
+        "1. Download and install from: https://qemu.weilnetz.de/w64/",
+        "2. Install via scoop: scoop install qemu",
+        "3. Install via chocolatey: choco install qemu",
+        "",
+        "After installation, QEMU should be available in your system PATH.",
+        "Alternatively, set the COWORK_SANDBOX_RUNTIME_URL environment variable to a QEMU package URL."
+      ].join("\n");
+    } else {
+      errorMsg = "Sandbox runtime download URL is not configured.";
+    }
+    throw new Error(errorMsg);
+  }
+  const archivePath = path$1.join(runtimeDir, `runtime-${platformKey}.download`);
+  await fs$4.promises.mkdir(runtimeDir, { recursive: true });
+  await downloadFile(url, archivePath, "runtime");
+  await verifySha256(archivePath, SANDBOX_RUNTIME_SHA256);
+  if (url.endsWith(".zip") || url.endsWith(".tar.gz") || url.endsWith(".tgz")) {
+    extractArchive(archivePath, runtimeDir);
+    await fs$4.promises.unlink(archivePath);
+  } else if (url.endsWith(".gz")) {
+    const tempPath = `${runtimeBinary}.download`;
+    await extractGzipBinary(archivePath, tempPath);
+    await fs$4.promises.unlink(archivePath);
+    if (await isTarFile(tempPath)) {
+      extractTarArchive(tempPath, runtimeDir);
+      await fs$4.promises.unlink(tempPath);
+    } else if (process.platform === "win32" && await isPEFile(tempPath)) {
+      const fileStats = await fs$4.promises.stat(tempPath);
+      console.log(`[Sandbox] Decompressed PE file: ${fileStats.size} bytes`);
+      const versionProbe = child_process.spawnSync(tempPath, ["--version"], { stdio: "pipe", timeout: 5e3 });
+      const versionOutput = ((_a = versionProbe.stdout) == null ? void 0 : _a.toString().trim()) || "";
+      console.log(`[Sandbox] PE --version probe: exit=${versionProbe.status}, stdout="${versionOutput.slice(0, 120)}"`);
+      if (versionProbe.status === 0 && versionOutput.toLowerCase().includes("qemu")) {
+        console.log("[Sandbox] Downloaded file is a QEMU binary, renaming directly");
+        await fs$4.promises.rename(tempPath, runtimeBinary);
+      } else {
+        const installerPath = path$1.join(runtimeDir, "qemu-installer.exe");
+        await fs$4.promises.rename(tempPath, installerPath);
+        try {
+          console.log(`[Sandbox] Running QEMU NSIS installer to: ${runtimeDir}`);
+          await runNsisInstaller(installerPath, runtimeDir);
+          console.log("[Sandbox] QEMU NSIS installer completed successfully");
+        } catch (error) {
+          try {
+            const entries = fs$4.readdirSync(runtimeDir);
+            console.log(`[Sandbox] Runtime dir contents after failed install: ${JSON.stringify(entries)}`);
+          } catch {
+          }
+          try {
+            await fs$4.promises.unlink(installerPath);
+          } catch {
+          }
+          throw new Error(`Failed to install QEMU: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        try {
+          const entries = fs$4.readdirSync(runtimeDir);
+          console.log(`[Sandbox] Runtime dir contents after install: ${JSON.stringify(entries)}`);
+        } catch {
+        }
+        try {
+          await fs$4.promises.unlink(installerPath);
+        } catch (error) {
+          console.warn("[Sandbox] Failed to remove QEMU installer after installation:", error);
+        }
+      }
+    } else {
+      await fs$4.promises.rename(tempPath, runtimeBinary);
+    }
+  } else {
+    const targetPath = runtimeBinary;
+    await fs$4.promises.rename(archivePath, targetPath);
+  }
+  const finalBinary = resolveRuntimeBinary(runtimeDir, runtimeBinary);
+  if (!finalBinary) {
+    try {
+      const listDir = (dir, prefix = "") => {
+        const results = [];
+        for (const entry of fs$4.readdirSync(dir, { withFileTypes: true })) {
+          const full = path$1.join(dir, entry.name);
+          results.push(`${prefix}${entry.name}${entry.isDirectory() ? "/" : ""}`);
+          if (entry.isDirectory()) {
+            results.push(...listDir(full, prefix + "  "));
+          }
+        }
+        return results;
+      };
+      console.log(`[Sandbox] Binary not found. Looking for: ${path$1.basename(runtimeBinary)}`);
+      console.log(`[Sandbox] Runtime dir tree:
+${listDir(runtimeDir).join("\n")}`);
+    } catch {
+    }
+    throw new Error("Sandbox runtime binary not found after extraction.");
+  }
+  console.log(`[Sandbox] Resolved runtime binary: ${finalBinary}`);
+  const validation = validateQemuBinary(finalBinary);
+  if (!validation.valid) {
+    console.warn(`[Sandbox] QEMU binary validation warning: ${validation.error}`);
+  }
+  if (process.platform !== "win32") {
+    try {
+      fs$4.chmodSync(finalBinary, 493);
+    } catch (error) {
+      console.warn("Failed to chmod sandbox runtime binary:", error);
+    }
+  }
+  ensureHypervisorEntitlement(finalBinary, runtimeDir);
+  return finalBinary;
+}
+async function ensureImage() {
+  const { imageDir, imagePath } = getSandboxPaths();
+  if (fs$4.existsSync(imagePath)) {
+    return imagePath;
+  }
+  const url = getImageUrl();
+  if (!url) {
+    const errorMsg = process.platform === "win32" ? "Windows sandbox image is not yet configured. Please set COWORK_SANDBOX_IMAGE_URL or COWORK_SANDBOX_BASE_URL environment variable, or wait for default Windows image support." : "Sandbox image download URL is not configured.";
+    throw new Error(errorMsg);
+  }
+  await fs$4.promises.mkdir(imageDir, { recursive: true });
+  const downloadPath = `${imagePath}.download`;
+  await downloadFile(url, downloadPath, "image");
+  await verifySha256(downloadPath, getImageSha256());
+  await fs$4.promises.rename(downloadPath, imagePath);
+  return imagePath;
+}
+async function ensureKernel() {
+  const override = getKernelPathOverride();
+  if (override && fs$4.existsSync(override)) {
+    return override;
+  }
+  const archVariant = getArchVariant();
+  if (!archVariant) return null;
+  const { imageDir } = getSandboxPaths();
+  const kernelPath = path$1.join(imageDir, `vmlinuz-virt-${archVariant}`);
+  if (fs$4.existsSync(kernelPath)) {
+    return kernelPath;
+  }
+  const url = getKernelUrl();
+  if (!url) return null;
+  await fs$4.promises.mkdir(imageDir, { recursive: true });
+  const downloadPath = `${kernelPath}.download`;
+  await downloadFile(url, downloadPath, "image");
+  await fs$4.promises.rename(downloadPath, kernelPath);
+  return kernelPath;
+}
+async function ensureInitrd() {
+  const override = getInitrdPathOverride();
+  if (override && fs$4.existsSync(override)) {
+    return override;
+  }
+  const archVariant = getArchVariant();
+  if (!archVariant) return null;
+  const { imageDir } = getSandboxPaths();
+  const initrdPath = path$1.join(imageDir, `initramfs-virt-${archVariant}`);
+  if (fs$4.existsSync(initrdPath)) {
+    return initrdPath;
+  }
+  const url = getInitrdUrl();
+  if (!url) return null;
+  await fs$4.promises.mkdir(imageDir, { recursive: true });
+  const downloadPath = `${initrdPath}.download`;
+  await downloadFile(url, downloadPath, "image");
+  await fs$4.promises.rename(downloadPath, initrdPath);
+  return initrdPath;
+}
+function resolveAvailableRuntimeBinary() {
+  const { runtimeDir, runtimeBinary } = getSandboxPaths();
+  const localRuntime = resolveRuntimeBinary(runtimeDir, runtimeBinary);
+  if (localRuntime) {
+    return localRuntime;
+  }
+  if (process.platform === "win32") {
+    if (_resolvedSystemQemuPath && fs$4.existsSync(_resolvedSystemQemuPath)) {
+      return _resolvedSystemQemuPath;
+    }
+    const systemQemu = findSystemQemu();
+    if (systemQemu) {
+      const validation = validateQemuBinary(systemQemu);
+      if (validation.valid && checkQemuVirtfsSupport(systemQemu)) {
+        _resolvedSystemQemuPath = systemQemu;
+        return systemQemu;
+      }
+    }
+  }
+  return null;
+}
+let _ensureSandboxReadyPromise = null;
+function ensureSandboxReady() {
+  if (_ensureSandboxReadyPromise) {
+    return _ensureSandboxReadyPromise;
+  }
+  _ensureSandboxReadyPromise = _ensureSandboxReadyImpl();
+  _ensureSandboxReadyPromise.finally(() => {
+    _ensureSandboxReadyPromise = null;
+  });
+  return _ensureSandboxReadyPromise;
+}
+async function _ensureSandboxReadyImpl() {
+  const platformKey = getPlatformKey();
+  if (!platformKey) {
+    return { ok: false, error: "Sandbox VM is not supported on this platform." };
+  }
+  coworkLog("INFO", "ensureSandboxReady", "Checking sandbox readiness", {
+    platformKey,
+    platform: process.platform,
+    arch: process.arch
+  });
+  try {
+    if (!downloadState.runtime) {
+      downloadState.runtime = ensureRuntime();
+    }
+    const runtimeBinary = await downloadState.runtime;
+    downloadState.runtime = null;
+    if (!downloadState.image) {
+      downloadState.image = ensureImage();
+    }
+    const imagePath = await downloadState.image;
+    downloadState.image = null;
+    let kernelPath = null;
+    let initrdPath = null;
+    try {
+      kernelPath = await ensureKernel();
+      initrdPath = await ensureInitrd();
+    } catch (error) {
+      console.warn("Failed to download sandbox kernel/initrd:", error);
+    }
+    const { baseDir } = getSandboxPaths();
+    downloadState.error = null;
+    downloadState.progress = void 0;
+    coworkLog("INFO", "ensureSandboxReady", "Sandbox ready", {
+      runtimeBinary,
+      runtimeExists: fs$4.existsSync(runtimeBinary),
+      imagePath,
+      imageExists: fs$4.existsSync(imagePath),
+      kernelPath,
+      initrdPath
+    });
+    return {
+      ok: true,
+      runtimeInfo: {
+        platform: process.platform,
+        arch: process.arch,
+        runtimeBinary,
+        imagePath,
+        kernelPath,
+        initrdPath,
+        baseDir
+      }
+    };
+  } catch (error) {
+    downloadState.error = error instanceof Error ? error.message : String(error);
+    downloadState.runtime = null;
+    downloadState.image = null;
+    coworkLog("ERROR", "ensureSandboxReady", "Sandbox not ready", {
+      error: downloadState.error
+    });
+    return { ok: false, error: downloadState.error };
+  }
+}
+function getSandboxStatus() {
+  const platformKey = getPlatformKey();
+  if (!platformKey) {
+    return {
+      supported: false,
+      runtimeReady: false,
+      imageReady: false,
+      downloading: Boolean(downloadState.runtime || downloadState.image),
+      error: downloadState.error
+    };
+  }
+  const { imagePath } = getSandboxPaths();
+  const runtimeReady = Boolean(resolveAvailableRuntimeBinary());
+  const imageReady = fs$4.existsSync(imagePath);
+  return {
+    supported: true,
+    runtimeReady,
+    imageReady,
+    downloading: Boolean(downloadState.runtime || downloadState.image),
+    progress: downloadState.progress,
+    error: downloadState.error
+  };
+}
 electron.app.name = APP_NAME;
 electron.app.setName(APP_NAME);
 const isDev = process.env.NODE_ENV === "development";
@@ -8038,6 +8896,17 @@ if (!gotTheLock) {
       }
     }
   );
+  electron.ipcMain.handle("cowork:sandbox:status", async () => {
+    return getSandboxStatus();
+  });
+  electron.ipcMain.handle("cowork:sandbox:install", async () => {
+    const result = await ensureSandboxReady();
+    return {
+      success: result.ok,
+      status: getSandboxStatus(),
+      error: result.ok ? void 0 : "error" in result ? result.error : void 0
+    };
+  });
   electron.app.on("second-instance", (_event, commandLine, workingDirectory) => {
     console.log("[Main] second-instance event", {
       commandLine,

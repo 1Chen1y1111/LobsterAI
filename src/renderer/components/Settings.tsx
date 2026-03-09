@@ -20,6 +20,7 @@ import GeneralSettings from './general/GeneralSettings'
 import ModelSettings from './model/ModelSettings'
 import EmailSkillSettings from './skills/EmailSkillSettings'
 import CoworkMemorySettings from './cowork/CoworkMemorySettings'
+import CoworkSandboxSettings from './cowork/CoworkSandboxSettings'
 
 export type TabType = 'general' | 'model' | 'coworkSandbox' | 'coworkMemory' | 'shortcuts' | 'im' | 'email' | 'about'
 
@@ -106,6 +107,9 @@ const Settings: React.FC<SettingsProps> = ({ initialTab, notice, onClose }) => {
 
       case 'coworkMemory':
         return <CoworkMemorySettings activeTab={activeTab} setError={setError} />
+
+      case 'coworkSandbox':
+        return <CoworkSandboxSettings />
 
       default:
         return null

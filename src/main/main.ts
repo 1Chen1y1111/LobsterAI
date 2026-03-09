@@ -6,6 +6,7 @@ import { APP_NAME } from './appConstants'
 import { SkillManager } from './skillManager'
 import { SqliteStore } from './sqliteStore'
 import { CoworkStore } from './coworkStore'
+import { ensureSandboxReady, getSandboxStatus } from './libs/coworkSandboxRuntime'
 
 // 设置应用程序名称
 app.name = APP_NAME
@@ -301,6 +302,19 @@ if (!gotTheLock) {
       }
     }
   )
+
+  ipcMain.handle('cowork:sandbox:status', async () => {
+    return getSandboxStatus()
+  })
+
+  ipcMain.handle('cowork:sandbox:install', async () => {
+    const result = await ensureSandboxReady()
+    return {
+      success: result.ok,
+      status: getSandboxStatus(),
+      error: result.ok ? undefined : 'error' in result ? result.error : undefined
+    }
+  })
 
   app.on('second-instance', (_event, commandLine, workingDirectory) => {
     console.log('[Main] second-instance event', {

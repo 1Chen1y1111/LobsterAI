@@ -1,4 +1,4 @@
-import { CoworkMemoryStats, CoworkUserMemoryEntry } from '@/types/cowork'
+import { CoworkMemoryStats, CoworkSandboxStatus, CoworkUserMemoryEntry } from '@/types/cowork'
 
 class CoworkService {
   async createMemoryEntry(input: { text: string; confidence?: number; isExplicit?: boolean }): Promise<CoworkUserMemoryEntry | null> {
@@ -50,6 +50,20 @@ class CoworkService {
     const result = await api(input)
     if (!result?.success || !result.entry) return null
     return result.entry
+  }
+
+  async installSandbox(): Promise<{ success: boolean; status: CoworkSandboxStatus; error?: string } | null> {
+    if (!window.electron?.cowork?.installSandbox) {
+      return null
+    }
+    return window.electron.cowork.installSandbox()
+  }
+
+  async getSandboxStatus(): Promise<CoworkSandboxStatus | null> {
+    if (!window.electron?.cowork?.getSandboxStatus) {
+      return null
+    }
+    return window.electron.cowork.getSandboxStatus()
   }
 }
 
