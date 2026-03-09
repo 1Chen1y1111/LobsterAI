@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useState } from 'react'
 import ThemedSelect from '../ui/ThemedSelect'
 import { i18nService, LanguageType } from '@/services/i18n'
 import { themeService } from '@/services/theme'
@@ -6,18 +6,36 @@ import LightAppearance from '../icons/appearance/LightAppearance'
 import DarkAppearance from '../icons/appearance/DarkAppearance'
 import SystemAppearance from '../icons/appearance/SystemAppearance'
 import { configService } from '@/services/config'
+import type { SettingsSectionHandle } from '../SettingsSection'
 
 interface GeneralSettingsProps {
   language: LanguageType
-  setError: (message: string) => void
+  setError: (message: string | null) => void
   setLanguage: (language: LanguageType) => void
 }
 
-const GeneralSettings: React.FC<GeneralSettingsProps> = ({ language, setLanguage, setError }) => {
+const GeneralSettings = forwardRef<SettingsSectionHandle, GeneralSettingsProps>(({ language, setLanguage, setError }, ref) => {
   const [autoLaunch, setAutoLaunchState] = useState(false)
   const [useSystemProxy, setUseSystemProxy] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system')
   const [isUpdatingAutoLaunch, setIsUpdatingAutoLaunch] = useState(false)
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      save: async () => {
+        await configService.updateConfig({
+          theme,
+          language,
+          useSystemProxy
+        })
+
+        themeService.setTheme(theme)
+        i18nService.setLanguage(language, { persist: false })
+      }
+    }),
+    [language, theme, useSystemProxy]
+  )
 
   useEffect(() => {
     const config = configService.getConfig()
@@ -26,7 +44,6 @@ const GeneralSettings: React.FC<GeneralSettingsProps> = ({ language, setLanguage
     setLanguage(config.language)
     setUseSystemProxy(config.useSystemProxy ?? false)
 
-    // Load auto-launch setting
     window.electron.autoLaunch
       .get()
       .then(({ enabled }) => {
@@ -35,11 +52,10 @@ const GeneralSettings: React.FC<GeneralSettingsProps> = ({ language, setLanguage
       .catch((err) => {
         console.error('Failed to load auto-launch setting:', err)
       })
-  }, [])
+  }, [setLanguage])
 
   return (
     <div className="space-y-8">
-      {/* Language Section */}
       <div className="flex items-center justify-between">
         <h4 className="text-sm font-medium dark:text-claude-darkText text-claude-text">{i18nService.t('language')}</h4>
         <div className="w-[140px] shrink-0">
@@ -59,7 +75,6 @@ const GeneralSettings: React.FC<GeneralSettingsProps> = ({ language, setLanguage
         </div>
       </div>
 
-      {/* Auto-launch Section */}
       <div>
         <h4 className="text-sm font-medium dark:text-claude-darkText text-claude-text mb-3">{i18nService.t('autoLaunch')}</h4>
         <label className="flex items-center justify-between cursor-pointer">
@@ -102,7 +117,6 @@ const GeneralSettings: React.FC<GeneralSettingsProps> = ({ language, setLanguage
         </label>
       </div>
 
-      {/* System proxy Section */}
       <div>
         <h4 className="text-sm font-medium dark:text-claude-darkText text-claude-text mb-3">{i18nService.t('useSystemProxy')}</h4>
         <label className="flex items-center justify-between cursor-pointer">
@@ -129,7 +143,6 @@ const GeneralSettings: React.FC<GeneralSettingsProps> = ({ language, setLanguage
         </label>
       </div>
 
-      {/* Appearance Section */}
       <div>
         <h4 className="text-sm font-medium dark:text-claude-darkText text-claude-text mb-3">{i18nService.t('appearance')}</h4>
         <div className="grid grid-cols-3 gap-4">
@@ -167,6 +180,8 @@ const GeneralSettings: React.FC<GeneralSettingsProps> = ({ language, setLanguage
       </div>
     </div>
   )
-}
+})
+
+GeneralSettings.displayName = 'GeneralSettings'
 
 export default GeneralSettings

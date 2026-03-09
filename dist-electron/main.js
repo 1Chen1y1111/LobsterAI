@@ -11762,6 +11762,15 @@ const getSkillManager = () => {
 if (!gotTheLock) {
   require$$0$1.app.quit();
 } else {
+  require$$0$1.ipcMain.handle("store:get", (_event, key) => {
+    return getStore().get(key);
+  });
+  require$$0$1.ipcMain.handle("store:set", (_event, key, value) => {
+    getStore().set(key, value);
+  });
+  require$$0$1.ipcMain.handle("store:remove", (_event, key) => {
+    getStore().delete(key);
+  });
   require$$0$1.ipcMain.on("window-minimize", () => {
     mainWindow == null ? void 0 : mainWindow.minimize();
   });

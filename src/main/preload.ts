@@ -4,6 +4,11 @@ import { ipcRenderer, contextBridge } from 'electron'
 contextBridge.exposeInMainWorld('electron', {
   platform: process.platform,
   arch: process.arch,
+  store: {
+    get: (key: string) => ipcRenderer.invoke('store:get', key),
+    set: (key: string, value: any) => ipcRenderer.invoke('store:set', key, value),
+    remove: (key: string) => ipcRenderer.invoke('store:remove', key)
+  },
   skills: {
     list: () => ipcRenderer.invoke('skills:list'),
     setEnabled: (options: { id: string; enabled: boolean }) => ipcRenderer.invoke('skills:setEnabled', options),

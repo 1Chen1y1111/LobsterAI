@@ -1,18 +1,20 @@
 import { i18nService } from '@/services/i18n'
-import { RootState } from '@/store'
-import { useCallback, useEffect, useState } from 'react'
+import { RootState, store } from '@/store'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react'
 import { useSelector } from 'react-redux'
 import { PlusCircleIcon } from '@heroicons/react/24/outline'
 import { CoworkMemoryStats, CoworkUserMemoryEntry } from '@/types/cowork'
 import { coworkService } from '@/services/cowork'
+import { updateConfig } from '@/store/slices/coworkSlice'
 import { TabType } from '../Settings'
+import type { SettingsSectionHandle } from '../SettingsSection'
 
 interface CoworkMemorySettingsProps {
   activeTab: TabType
   setError: (message: string) => void
 }
 
-const CoworkMemorySettings: React.FC<CoworkMemorySettingsProps> = ({ activeTab, setError }) => {
+const CoworkMemorySettings = forwardRef<SettingsSectionHandle, CoworkMemorySettingsProps>(({ activeTab, setError }, ref) => {
   const coworkConfig = useSelector((state: RootState) => state.cowork.config)
 
   const [coworkMemoryEnabled, setCoworkMemoryEnabled] = useState<boolean>(coworkConfig.memoryEnabled ?? true)
@@ -24,6 +26,21 @@ const CoworkMemorySettings: React.FC<CoworkMemorySettingsProps> = ({ activeTab, 
   const [coworkMemoryEditingId, setCoworkMemoryEditingId] = useState<string | null>(null)
   const [coworkMemoryDraftText, setCoworkMemoryDraftText] = useState<string>('')
   const [showMemoryModal, setShowMemoryModal] = useState<boolean>(false)
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      save: async () => {
+        store.dispatch(
+          updateConfig({
+            memoryEnabled: coworkMemoryEnabled,
+            memoryLlmJudgeEnabled: coworkMemoryLlmJudgeEnabled
+          })
+        )
+      }
+    }),
+    [coworkMemoryEnabled, coworkMemoryLlmJudgeEnabled]
+  )
 
   const handleOpenCoworkMemoryModal = () => {
     resetCoworkMemoryEditor()
@@ -125,6 +142,11 @@ const CoworkMemorySettings: React.FC<CoworkMemorySettingsProps> = ({ activeTab, 
     void loadCoworkMemoryData()
   }, [activeTab, loadCoworkMemoryData])
 
+  useEffect(() => {
+    setCoworkMemoryEnabled(coworkConfig.memoryEnabled ?? true)
+    setCoworkMemoryLlmJudgeEnabled(coworkConfig.memoryLlmJudgeEnabled ?? false)
+  }, [coworkConfig.memoryEnabled, coworkConfig.memoryLlmJudgeEnabled])
+
   return (
     <>
       <div className="space-y-6">
@@ -186,7 +208,7 @@ const CoworkMemorySettings: React.FC<CoworkMemorySettingsProps> = ({ activeTab, 
 
           {coworkMemoryStats && (
             <div className="text-xs dark:text-claude-darkTextSecondary text-claude-textSecondary">
-              {`${i18nService.t('coworkMemoryTotalLabel')}: ${coworkMemoryStats.created + coworkMemoryStats.stale} · ${i18nService.t('coworkMemoryActiveLabel')}: ${coworkMemoryStats.created} · ${i18nService.t('coworkMemoryInactiveLabel')}: ${coworkMemoryStats.stale}`}
+              {`${i18nService.t('coworkMemoryTotalLabel')}: ${coworkMemoryStats.created + coworkMemoryStats.stale} 路 ${i18nService.t('coworkMemoryActiveLabel')}: ${coworkMemoryStats.created} 路 ${i18nService.t('coworkMemoryInactiveLabel')}: ${coworkMemoryStats.stale}`}
             </div>
           )}
 
@@ -252,7 +274,6 @@ const CoworkMemorySettings: React.FC<CoworkMemorySettingsProps> = ({ activeTab, 
         </div>
       </div>
 
-      {/* Memory Modal */}
       {showMemoryModal && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/35 px-4" onClick={resetCoworkMemoryEditor}>
           <div
@@ -304,6 +325,8 @@ const CoworkMemorySettings: React.FC<CoworkMemorySettingsProps> = ({ activeTab, 
       )}
     </>
   )
-}
+})
+
+CoworkMemorySettings.displayName = 'CoworkMemorySettings'
 
 export default CoworkMemorySettings

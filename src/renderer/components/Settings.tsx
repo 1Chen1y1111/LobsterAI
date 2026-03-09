@@ -15,6 +15,7 @@ import {
 import BrainIcon from './icons/BrainIcon'
 import ShortcutsIcon from './icons/ShortcutsIcon'
 import ErrorMessage from './ErrorMessage'
+import type { SettingsSectionHandle } from './SettingsSection'
 
 import GeneralSettings from './general/GeneralSettings'
 import ModelSettings from './model/ModelSettings'
@@ -23,8 +24,8 @@ import CoworkMemorySettings from './cowork/CoworkMemorySettings'
 import CoworkSandboxSettings from './cowork/CoworkSandboxSettings'
 import ShortcutsSettings from './shortcuts/ShortcutsSettings'
 import AboutSettings from './about/AboutSettings'
-import { configService } from '@/services/config'
 import { themeService } from '@/services/theme'
+import { configService } from '@/services/config'
 
 export type TabType = 'general' | 'model' | 'coworkSandbox' | 'coworkMemory' | 'shortcuts' | 'im' | 'email' | 'about'
 
@@ -38,19 +39,22 @@ interface SettingsProps extends SettingsOpenOptions {
 }
 
 const Settings: React.FC<SettingsProps> = ({ initialTab, notice, onClose }) => {
-  // 状态
   const [activeTab, setActiveTab] = useState<TabType>(initialTab ?? 'general')
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [noticeMessage, setNoticeMessage] = useState<string | null>(notice ?? null)
+  const [language, setLanguage] = useState<LanguageType>(i18nService.getLanguage())
 
-  const [language, setLanguage] = useState<LanguageType>('zh')
-
-  const contentRef = useRef<HTMLDivElement>(null)
   const initialThemeRef = useRef<'light' | 'dark' | 'system'>(themeService.getTheme())
   const initialLanguageRef = useRef<LanguageType>(i18nService.getLanguage())
 
-  // 渲染标签页
+  const didSaveRef = useRef(false)
+  const generalSettingsRef = useRef<SettingsSectionHandle>(null)
+  const modelSettingsRef = useRef<SettingsSectionHandle>(null)
+  const coworkSandboxSettingsRef = useRef<SettingsSectionHandle>(null)
+  const coworkMemorySettingsRef = useRef<SettingsSectionHandle>(null)
+  const shortcutsSettingsRef = useRef<SettingsSectionHandle>(null)
+
   const sidebarTabs: { key: TabType; label: string; icon: React.ReactNode }[] = useMemo(
     () => [
       {
@@ -98,38 +102,9 @@ const Settings: React.FC<SettingsProps> = ({ initialTab, notice, onClose }) => {
   )
 
   const activeTabLabel = useMemo(() => {
-    return sidebarTabs.find((t) => t.key === activeTab)?.label ?? ''
+    return sidebarTabs.find((tab) => tab.key === activeTab)?.label ?? ''
   }, [activeTab, sidebarTabs])
 
-  const renderTabContent = () => {
-    switch (activeTab) {
-      case 'general':
-        return <GeneralSettings language={language} setLanguage={setLanguage} setError={setError} />
-
-      case 'model':
-        return <ModelSettings language={language} setError={setError} setNoticeMessage={setNoticeMessage} />
-
-      case 'email':
-        return <EmailSkillSettings />
-
-      case 'coworkMemory':
-        return <CoworkMemorySettings activeTab={activeTab} setError={setError} />
-
-      case 'coworkSandbox':
-        return <CoworkSandboxSettings />
-
-      case 'shortcuts':
-        return <ShortcutsSettings />
-
-      case 'about':
-        return <AboutSettings language={language} setError={setError} setNoticeMessage={setNoticeMessage} />
-
-      default:
-        return null
-    }
-  }
-
-  // 阻止点击设置窗口时事件传播到背景
   const handleSettingsClick = (e: React.MouseEvent) => {
     e.stopPropagation()
   }
@@ -138,11 +113,30 @@ const Settings: React.FC<SettingsProps> = ({ initialTab, notice, onClose }) => {
     e.preventDefault()
     setIsSaving(true)
     setError(null)
-  }
 
-  // 标签页切换处理
-  const handleTabChange = (tab: TabType) => {
-    setActiveTab(tab)
+    try {
+      const saveableSections = [
+        generalSettingsRef,
+        modelSettingsRef,
+        coworkSandboxSettingsRef,
+        coworkMemorySettingsRef,
+        shortcutsSettingsRef
+      ]
+
+      for (const sectionRef of saveableSections) {
+        if (sectionRef.current) {
+          await sectionRef.current.save()
+        }
+      }
+
+      didSaveRef.current = true
+
+      onClose()
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Failed to save settings')
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   useEffect(() => {
@@ -151,9 +145,19 @@ const Settings: React.FC<SettingsProps> = ({ initialTab, notice, onClose }) => {
 
       initialThemeRef.current = config.theme
       initialLanguageRef.current = config.language
-      setLanguage(config.language)
     } catch (error) {
       setError('Failed to load settings')
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (didSaveRef.current) {
+        return
+      }
+
+      themeService.setTheme(initialThemeRef.current)
+      i18nService.setLanguage(initialLanguageRef.current, { persist: false })
     }
   }, [])
 
@@ -163,7 +167,6 @@ const Settings: React.FC<SettingsProps> = ({ initialTab, notice, onClose }) => {
         className="flex w-[900px] h-[80vh] rounded-2xl dark:border-claude-darkBorder border-claude-border border shadow-modal overflow-hidden modal-content"
         onClick={handleSettingsClick}
       >
-        {/* Left sidebar */}
         <div className="w-[220px] shrink-0 flex flex-col dark:bg-claude-darkSurfaceMuted bg-claude-surfaceMuted border-r dark:border-claude-darkBorder border-claude-border rounded-l-2xl overflow-y-auto">
           <div className="px-5 pt-5 pb-3">
             <h2 className="text-lg font-semibold dark:text-claude-darkText text-claude-text">{i18nService.t('settings')}</h2>
@@ -172,7 +175,7 @@ const Settings: React.FC<SettingsProps> = ({ initialTab, notice, onClose }) => {
             {sidebarTabs.map((tab) => (
               <button
                 key={tab.key}
-                onClick={() => handleTabChange(tab.key)}
+                onClick={() => setActiveTab(tab.key)}
                 className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors text-left ${
                   activeTab === tab.key
                     ? 'bg-claude-accent/10 text-claude-accent'
@@ -186,9 +189,7 @@ const Settings: React.FC<SettingsProps> = ({ initialTab, notice, onClose }) => {
           </nav>
         </div>
 
-        {/* Right content */}
         <div className="relative flex-1 flex flex-col min-w-0 overflow-hidden dark:bg-claude-darkBg bg-claude-bg rounded-r-2xl">
-          {/* Content header */}
           <div className="flex justify-between items-center px-6 pt-5 pb-3 shrink-0">
             <h3 className="text-lg font-semibold dark:text-claude-darkText text-claude-text">{activeTabLabel}</h3>
             <button
@@ -212,12 +213,36 @@ const Settings: React.FC<SettingsProps> = ({ initialTab, notice, onClose }) => {
           )}
 
           <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden">
-            {/* Tab content */}
-            <div ref={contentRef} className="px-6 py-4 flex-1 overflow-y-auto">
-              {renderTabContent()}
+            <div className="px-6 py-4 flex-1 overflow-y-auto">
+              <div className={activeTab === 'general' ? 'block' : 'hidden'}>
+                <GeneralSettings ref={generalSettingsRef} language={language} setLanguage={setLanguage} setError={setError} />
+              </div>
+
+              <div className={activeTab === 'model' ? 'block' : 'hidden'}>
+                <ModelSettings ref={modelSettingsRef} language={language} setError={setError} setNoticeMessage={setNoticeMessage} />
+              </div>
+
+              <div className={activeTab === 'email' ? 'block' : 'hidden'}>
+                <EmailSkillSettings />
+              </div>
+
+              <div className={activeTab === 'coworkMemory' ? 'block' : 'hidden'}>
+                <CoworkMemorySettings ref={coworkMemorySettingsRef} activeTab={activeTab} setError={setError} />
+              </div>
+
+              <div className={activeTab === 'coworkSandbox' ? 'block' : 'hidden'}>
+                <CoworkSandboxSettings ref={coworkSandboxSettingsRef} />
+              </div>
+
+              <div className={activeTab === 'shortcuts' ? 'block' : 'hidden'}>
+                <ShortcutsSettings ref={shortcutsSettingsRef} />
+              </div>
+
+              <div className={activeTab === 'about' ? 'block' : 'hidden'}>
+                <AboutSettings language={language} setError={setError} setNoticeMessage={setNoticeMessage} />
+              </div>
             </div>
 
-            {/* Footer buttons */}
             <div className="flex justify-end space-x-4 p-4 dark:border-claude-darkBorder border-claude-border border-t dark:bg-claude-darkBg bg-claude-bg shrink-0">
               <button
                 type="button"

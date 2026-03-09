@@ -1,79 +1,104 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import WindowTitleBar from "./components/window/WindowTitleBar";
-import { ChatBubbleLeftRightIcon } from "@heroicons/react/24/outline";
-import Settings, { SettingsOpenOptions } from "./components/Settings";
-import { i18nService } from "./services/i18n";
-import { configService } from "./services/config";
-import Toast from "./components/Toast";
-import Sidebar from "./components/Sidebar";
-import { CoworkView } from "./components/cowork";
+import { useCallback, useEffect, useRef, useState } from 'react'
+import WindowTitleBar from './components/window/WindowTitleBar'
+import { ChatBubbleLeftRightIcon } from '@heroicons/react/24/outline'
+import Settings, { SettingsOpenOptions } from './components/Settings'
+import { i18nService } from './services/i18n'
+import { configService } from './services/config'
+import Toast from './components/Toast'
+import Sidebar from './components/Sidebar'
+import { CoworkView } from './components/cowork'
+import { apiService } from './services/api'
+import { setAvailableModels } from './store/slices/modelSlice'
+import { useDispatch } from 'react-redux'
 
 const App: React.FC = () => {
-  const [showSettings, setShowSettings] = useState(false);
-  const [settingsOptions, setSettingsOptions] = useState<SettingsOpenOptions>(
-    {},
-  );
-  const [mainView, setMainView] = useState<
-    "cowork" | "skills" | "scheduledTasks"
-  >("cowork");
-  const [isInitialized, setIsInitialized] = useState(false);
-  const [initError, setInitError] = useState<string | null>(null);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [showSettings, setShowSettings] = useState(false)
+  const [settingsOptions, setSettingsOptions] = useState<SettingsOpenOptions>({})
+  const [mainView, setMainView] = useState<'cowork' | 'skills' | 'scheduledTasks'>('cowork')
+  const [isInitialized, setIsInitialized] = useState(false)
+  const [initError, setInitError] = useState<string | null>(null)
+  const [toastMessage, setToastMessage] = useState<string | null>(null)
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
+  const [showUpdateModal, setShowUpdateModal] = useState(false)
 
-  const hasInitialized = useRef(false);
+  const dispatch = useDispatch()
 
-  const isWindows = window.electron.platform === "win32";
+  const hasInitialized = useRef(false)
+
+  const isWindows = window.electron.platform === 'win32'
 
   // 初始化应用
   useEffect(() => {
     if (hasInitialized.current) {
-      return;
+      return
     }
-    hasInitialized.current = true;
+    hasInitialized.current = true
 
     const initializeApp = async () => {
       try {
         // 标记平台，用于 CSS 条件样式（如 Windows 标题栏按钮区域留白）
-        document.documentElement.classList.add(
-          `platform-${window.electron.platform}`,
-        );
+        document.documentElement.classList.add(`platform-${window.electron.platform}`)
 
-        setIsInitialized(true);
+        setIsInitialized(true)
       } catch (error) {
-        console.error("Failed to initialize app:", error);
-        setInitError("initializationError");
-        setIsInitialized(true);
+        console.error('Failed to initialize app:', error)
+        setInitError('initializationError')
+        setIsInitialized(true)
       }
-    };
+    }
 
-    initializeApp();
-  }, []);
+    initializeApp()
+  }, [])
 
   const handleShowSettings = useCallback((options?: SettingsOpenOptions) => {
     setSettingsOptions({
       initialTab: options?.initialTab,
-      notice: options?.notice,
-    });
-    setShowSettings(true);
-  }, []);
+      notice: options?.notice
+    })
+    setShowSettings(true)
+  }, [])
 
   const handleCloseSettings = () => {
-    setShowSettings(false);
-  };
+    setShowSettings(false)
+
+    const config = configService.getConfig()
+    apiService.setConfig({
+      apiKey: config.api.key,
+      baseUrl: config.api.baseUrl
+    })
+
+    if (config.providers) {
+      const allModels: { id: string; name: string; provider?: string; providerKey?: string; supportsImage?: boolean }[] = []
+      Object.entries(config.providers).forEach(([providerName, providerConfig]) => {
+        if (providerConfig.enabled && providerConfig.models) {
+          providerConfig.models.forEach((model: { id: string; name: string; supportsImage?: boolean }) => {
+            allModels.push({
+              id: model.id,
+              name: model.name,
+              provider: providerName.charAt(0).toUpperCase() + providerName.slice(1),
+              providerKey: providerName,
+              supportsImage: model.supportsImage ?? false
+            })
+          })
+        }
+      })
+      if (allModels.length > 0) {
+        dispatch(setAvailableModels(allModels))
+      }
+    }
+  }
 
   const handleToggleSidebar = useCallback(() => {
-    setIsSidebarCollapsed((prev) => !prev);
-  }, []);
+    setIsSidebarCollapsed((prev) => !prev)
+  }, [])
 
-  const isOverlayActive = showSettings || showUpdateModal;
+  const isOverlayActive = showSettings || showUpdateModal
 
   const windowsStandaloneTitleBar = isWindows ? (
     <div className="draggable relative h-9 shrink-0 dark:bg-claude-darkSurfaceMuted bg-claude-surfaceMuted">
       <WindowTitleBar isOverlayActive={isOverlayActive} />
     </div>
-  ) : null;
+  ) : null
 
   if (!isInitialized) {
     return (
@@ -87,13 +112,11 @@ const App: React.FC = () => {
             <div className="w-24 h-1 rounded-full bg-claude-accent/20 overflow-hidden">
               <div className="h-full w-1/2 rounded-full bg-claude-accent animate-shimmer" />
             </div>
-            <div className="dark:text-claude-darkText text-claude-text text-xl font-medium">
-              {i18nService.t("loading")}
-            </div>
+            <div className="dark:text-claude-darkText text-claude-text text-xl font-medium">{i18nService.t('loading')}</div>
           </div>
         </div>
       </div>
-    );
+    )
   }
 
   if (initError) {
@@ -105,9 +128,7 @@ const App: React.FC = () => {
             <div className="w-16 h-16 rounded-full bg-red-500 flex items-center justify-center shadow-lg">
               <ChatBubbleLeftRightIcon className="h-8 w-8 text-white" />
             </div>
-            <div className="dark:text-claude-darkText text-claude-text text-xl font-medium text-center">
-              {initError}
-            </div>
+            <div className="dark:text-claude-darkText text-claude-text text-xl font-medium text-center">{initError}</div>
             <button
               onClick={() => handleShowSettings()}
               className="px-6 py-2.5 bg-claude-accent hover:bg-claude-accentHover text-white rounded-xl shadow-md transition-colors text-sm font-medium"
@@ -116,22 +137,16 @@ const App: React.FC = () => {
             </button>
           </div>
           {showSettings && (
-            <Settings
-              onClose={handleCloseSettings}
-              initialTab={settingsOptions.initialTab}
-              notice={settingsOptions.notice}
-            />
+            <Settings onClose={handleCloseSettings} initialTab={settingsOptions.initialTab} notice={settingsOptions.notice} />
           )}
         </div>
       </div>
-    );
+    )
   }
 
   return (
     <div className="h-screen overflow-hidden flex flex-col dark:bg-claude-darkSurfaceMuted bg-claude-surfaceMuted">
-      {toastMessage && (
-        <Toast message={toastMessage} onClose={() => setToastMessage(null)} />
-      )}
+      {toastMessage && <Toast message={toastMessage} onClose={() => setToastMessage(null)} />}
 
       <div className="flex flex-1 min-h-0 overflow-hidden">
         <Sidebar
@@ -141,9 +156,7 @@ const App: React.FC = () => {
           onToggleCollapse={handleToggleSidebar}
         />
 
-        <div
-          className={`flex-1 min-w-0 py-1.5 pr-1.5 ${isSidebarCollapsed ? "pl-1.5" : ""}`}
-        >
+        <div className={`flex-1 min-w-0 py-1.5 pr-1.5 ${isSidebarCollapsed ? 'pl-1.5' : ''}`}>
           <div className="h-full rounded-xl dark:bg-claude-darkBg bg-claude-bg overflow-hidden">
             <CoworkView
               onRequestAppSettings={handleShowSettings}
@@ -155,15 +168,9 @@ const App: React.FC = () => {
       </div>
 
       {/* 设置窗口显示在所有主内容之上，但不影响主界面的交互 */}
-      {showSettings && (
-        <Settings
-          onClose={handleCloseSettings}
-          initialTab={settingsOptions.initialTab}
-          notice={settingsOptions.notice}
-        />
-      )}
+      {showSettings && <Settings onClose={handleCloseSettings} initialTab={settingsOptions.initialTab} notice={settingsOptions.notice} />}
     </div>
-  );
-};
+  )
+}
 
-export default App;
+export default App

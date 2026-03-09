@@ -139,6 +139,19 @@ const getSkillManager = () => {
 if (!gotTheLock) {
   app.quit()
 } else {
+  /* ------------------- store IPC handlers ------------------- */
+  ipcMain.handle('store:get', (_event, key) => {
+    return getStore().get(key)
+  })
+
+  ipcMain.handle('store:set', (_event, key, value) => {
+    getStore().set(key, value)
+  })
+
+  ipcMain.handle('store:remove', (_event, key) => {
+    getStore().delete(key)
+  })
+
   /* ------------------- Window control IPC handlers ------------------- */
   ipcMain.on('window-minimize', () => {
     mainWindow?.minimize()

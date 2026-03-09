@@ -16,11 +16,14 @@ import {
   CustomProviderIcon
 } from '../icons/providers'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { decryptSecret, decryptWithPassword, EncryptedPayload, encryptWithPassword, PasswordEncryptedPayload } from '@/services/encryption'
 import { APP_ID, EXPORT_FORMAT_TYPE, EXPORT_PASSWORD } from '@/constants/app'
 import { i18nService, LanguageType } from '@/services/i18n'
 import { configService } from '@/services/config'
+import { store } from '@/store'
+import { setAvailableModels } from '@/store/slices/modelSlice'
+import type { SettingsSectionHandle } from '../SettingsSection'
 
 const providerKeys = [
   'openai',
@@ -117,7 +120,7 @@ interface ModelSettingsProps {
   setNoticeMessage: (message: string | null) => void
 }
 
-const ModelSettings: React.FC<ModelSettingsProps> = ({ language, setError, setNoticeMessage }) => {
+const ModelSettings = forwardRef<SettingsSectionHandle, ModelSettingsProps>(({ language, setError, setNoticeMessage }, ref) => {
   const [isImportingProviders, setIsImportingProviders] = useState(false)
   const [isExportingProviders, setIsExportingProviders] = useState(false)
 
@@ -1132,6 +1135,52 @@ const ModelSettings: React.FC<ModelSettingsProps> = ({ language, setError, setNo
     }
   }, [])
 
+  useImperativeHandle(
+    ref,
+    () => ({
+      save: async () => {
+        const normalizedProviders = Object.fromEntries(
+          Object.entries(providers).map(([providerKey, providerConfig]) => [
+            providerKey,
+            {
+              ...providerConfig,
+              apiFormat: getEffectiveApiFormat(providerKey, providerConfig.apiFormat)
+            }
+          ])
+        ) as ProvidersConfig
+
+        const firstEnabledProvider = Object.entries(normalizedProviders).find(([_, config]) => config.enabled)
+        const primaryProvider = firstEnabledProvider ? firstEnabledProvider[1] : normalizedProviders[activeProvider]
+
+        await configService.updateConfig({
+          api: {
+            key: primaryProvider.apiKey,
+            baseUrl: primaryProvider.baseUrl
+          },
+          providers: normalizedProviders
+        })
+
+        const allModels: { id: string; name: string; provider?: string; providerKey?: string; supportsImage?: boolean }[] = []
+        Object.entries(normalizedProviders).forEach(([providerName, config]) => {
+          if (config.enabled && config.models) {
+            config.models.forEach((model) => {
+              allModels.push({
+                id: model.id,
+                name: model.name,
+                provider: providerName.charAt(0).toUpperCase() + providerName.slice(1),
+                providerKey: providerName,
+                supportsImage: model.supportsImage ?? false
+              })
+            })
+          }
+        })
+
+        store.dispatch(setAvailableModels(allModels))
+      }
+    }),
+    [activeProvider, providers]
+  )
+
   return (
     <>
       <div className="flex h-full">
@@ -1770,6 +1819,8 @@ const ModelSettings: React.FC<ModelSettingsProps> = ({ language, setError, setNo
       )}
     </>
   )
-}
+})
+
+ModelSettings.displayName = 'ModelSettings'
 
 export default ModelSettings

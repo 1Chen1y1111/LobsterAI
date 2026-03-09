@@ -1,16 +1,27 @@
 import { configService } from '@/services/config'
 import { i18nService } from '@/services/i18n'
-import { useEffect, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useState } from 'react'
+import type { SettingsSectionHandle } from '../SettingsSection'
 
-const ShortcutsSettings: React.FC = () => {
-  // 快捷键设置
+const ShortcutsSettings = forwardRef<SettingsSectionHandle>((_props, ref) => {
   const [shortcuts, setShortcuts] = useState({
     newChat: 'Ctrl+N',
     search: 'Ctrl+F',
     settings: 'Ctrl+,'
   })
 
-  // 快捷键更新处理
+  useImperativeHandle(
+    ref,
+    () => ({
+      save: async () => {
+        await configService.updateConfig({
+          shortcuts
+        })
+      }
+    }),
+    [shortcuts]
+  )
+
   const handleShortcutChange = (key: keyof typeof shortcuts, value: string) => {
     setShortcuts((prev) => ({
       ...prev,
@@ -21,7 +32,6 @@ const ShortcutsSettings: React.FC = () => {
   useEffect(() => {
     const config = configService.getConfig()
 
-    // 加载快捷键设置
     if (config.shortcuts) {
       setShortcuts((prev) => ({
         ...prev,
@@ -71,6 +81,8 @@ const ShortcutsSettings: React.FC = () => {
       </div>
     </div>
   )
-}
+})
+
+ShortcutsSettings.displayName = 'ShortcutsSettings'
 
 export default ShortcutsSettings

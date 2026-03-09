@@ -1,11 +1,13 @@
 import { coworkService } from '@/services/cowork'
 import { i18nService } from '@/services/i18n'
-import { RootState } from '@/store'
+import { RootState, store } from '@/store'
+import { updateConfig } from '@/store/slices/coworkSlice'
 import { CoworkExecutionMode, CoworkSandboxProgress, CoworkSandboxStatus } from '@/types/cowork'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react'
 import { useSelector } from 'react-redux'
+import type { SettingsSectionHandle } from '../SettingsSection'
 
-const CoworkSandboxSettings: React.FC = () => {
+const CoworkSandboxSettings = forwardRef<SettingsSectionHandle>((_props, ref) => {
   const coworkConfig = useSelector((state: RootState) => state.cowork.config)
 
   const [coworkExecutionMode, setCoworkExecutionMode] = useState<CoworkExecutionMode>(coworkConfig.executionMode || 'local')
@@ -13,6 +15,20 @@ const CoworkSandboxSettings: React.FC = () => {
   const [coworkSandboxLoading, setCoworkSandboxLoading] = useState(true)
   const [coworkSandboxProgress, setCoworkSandboxProgress] = useState<CoworkSandboxProgress | null>(null)
   const [coworkSandboxInstalling, setCoworkSandboxInstalling] = useState(false)
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      save: async () => {
+        store.dispatch(
+          updateConfig({
+            executionMode: coworkExecutionMode
+          })
+        )
+      }
+    }),
+    [coworkExecutionMode]
+  )
 
   const coworkSandboxDisabled = !coworkSandboxStatus?.supported || !coworkSandboxStatus?.runtimeReady || !coworkSandboxStatus?.imageReady
 
@@ -77,8 +93,12 @@ const CoworkSandboxSettings: React.FC = () => {
   }, [])
 
   useEffect(() => {
-    loadCoworkSandboxStatus()
+    void loadCoworkSandboxStatus()
   }, [loadCoworkSandboxStatus])
+
+  useEffect(() => {
+    setCoworkExecutionMode(coworkConfig.executionMode || 'local')
+  }, [coworkConfig.executionMode])
 
   return (
     <div className="space-y-6">
@@ -167,6 +187,8 @@ const CoworkSandboxSettings: React.FC = () => {
       </div>
     </div>
   )
-}
+})
+
+CoworkSandboxSettings.displayName = 'CoworkSandboxSettings'
 
 export default CoworkSandboxSettings
