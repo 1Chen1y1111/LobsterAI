@@ -17,6 +17,7 @@
     "@heroicons/react": "^2.2.0",
     "@reduxjs/toolkit": "^2.11.2",
     "@types/sql.js": "^1.4.9",
+    "cron-parser": "^5.5.0",
     "electron-log": "^5.4.3",
     "extract-zip": "^2.0.1",
     "js-yaml": "^4.1.1",

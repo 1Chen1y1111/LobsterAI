@@ -133,6 +133,21 @@ interface IElectronAPI {
       error?: string
     }>
   }
+  scheduledTasks: {
+    list: () => Promise<any>
+    get: (id: string) => Promise<any>
+    create: (input: any) => Promise<any>
+    update: (id: string, input: any) => Promise<any>
+    delete: (id: string) => Promise<any>
+    toggle: (id: string, enabled: boolean) => Promise<any>
+    runManually: (id: string) => Promise<any>
+    stop: (id: string) => Promise<any>
+    listRuns: (taskId: string, limit?: number, offset?: number) => Promise<any>
+    countRuns: (taskId: string) => Promise<any>
+    listAllRuns: (limit?: number, offset?: number) => Promise<any>
+    onStatusUpdate: (callback: (data: any) => void) => () => void
+    onRunUpdate: (callback: (data: any) => void) => () => void
+  }
 }
 
 declare global {

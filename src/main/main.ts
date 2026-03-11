@@ -12,6 +12,7 @@ import { exportLogsZip } from './libs/logExport'
 import { getCoworkLogPath } from './libs/coworkLogger'
 import { getAutoLaunchEnabled, setAutoLaunchEnabled } from './autoLaunchManager'
 import { McpStore } from './mcpStore'
+import { Scheduler } from 'node:timers/promises'
 
 // 设置应用程序名称
 app.name = APP_NAME
@@ -147,6 +148,8 @@ let store: SqliteStore | null = null
 let mcpStore: McpStore | null = null
 let coworkStore: CoworkStore | null = null
 let skillManager: SkillManager | null = null
+// let scheduler: Scheduler | null = null;
+// let scheduledTaskStore: ScheduledTaskStore | null = null;
 let storeInitPromise: Promise<SqliteStore> | null = null
 
 const initStore = async (): Promise<SqliteStore> => {
@@ -197,6 +200,15 @@ const getSkillManager = () => {
   }
   return skillManager
 }
+
+/* ------------------- ScheduledTask ------------------- */
+// const getScheduledTaskStore = () => {
+//   if (!scheduledTaskStore) {
+//     const sqliteStore = getStore();
+//     scheduledTaskStore = new ScheduledTaskStore(sqliteStore.getDatabase(), sqliteStore.getSaveFunction());
+//   }
+//   return scheduledTaskStore;
+// };
 
 if (!gotTheLock) {
   app.quit()
@@ -402,6 +414,9 @@ if (!gotTheLock) {
       return { success: false, error: error instanceof Error ? error.message : 'Failed to delete skill' }
     }
   })
+
+  /* ------------------- Scheduled Task IPC Handlers ------------------- */
+  // TODO:
 
   /* ------------------- api IPC handlers ------------------- */
   // API 代理处理程序 - 解决 CORS 问题

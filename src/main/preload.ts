@@ -150,5 +150,35 @@ contextBridge.exposeInMainWorld('electron', {
     getPath: () => ipcRenderer.invoke('log:getPath'),
     openFolder: () => ipcRenderer.invoke('log:openFolder'),
     exportZip: () => ipcRenderer.invoke('log:exportZip')
+  },
+  scheduledTasks: {
+    // Task CRUD
+    list: () => ipcRenderer.invoke('scheduledTask:list'),
+    get: (id: string) => ipcRenderer.invoke('scheduledTask:get', id),
+    create: (input: any) => ipcRenderer.invoke('scheduledTask:create', input),
+    update: (id: string, input: any) => ipcRenderer.invoke('scheduledTask:update', id, input),
+    delete: (id: string) => ipcRenderer.invoke('scheduledTask:delete', id),
+    toggle: (id: string, enabled: boolean) => ipcRenderer.invoke('scheduledTask:toggle', id, enabled),
+
+    // Execution
+    runManually: (id: string) => ipcRenderer.invoke('scheduledTask:runManually', id),
+    stop: (id: string) => ipcRenderer.invoke('scheduledTask:stop', id),
+
+    // Run history
+    listRuns: (taskId: string, limit?: number, offset?: number) => ipcRenderer.invoke('scheduledTask:listRuns', taskId, limit, offset),
+    countRuns: (taskId: string) => ipcRenderer.invoke('scheduledTask:countRuns', taskId),
+    listAllRuns: (limit?: number, offset?: number) => ipcRenderer.invoke('scheduledTask:listAllRuns', limit, offset),
+
+    // Stream event listeners
+    onStatusUpdate: (callback: (data: any) => void) => {
+      const handler = (_event: any, data: any) => callback(data)
+      ipcRenderer.on('scheduledTask:statusUpdate', handler)
+      return () => ipcRenderer.removeListener('scheduledTask:statusUpdate', handler)
+    },
+    onRunUpdate: (callback: (data: any) => void) => {
+      const handler = (_event: any, data: any) => callback(data)
+      ipcRenderer.on('scheduledTask:runUpdate', handler)
+      return () => ipcRenderer.removeListener('scheduledTask:runUpdate', handler)
+    }
   }
 })
