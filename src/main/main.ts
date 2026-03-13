@@ -13,13 +13,20 @@ import { getCoworkLogPath } from './libs/coworkLogger'
 import { getAutoLaunchEnabled, setAutoLaunchEnabled } from './autoLaunchManager'
 import { McpStore } from './mcpStore'
 import { Scheduler } from 'node:timers/promises'
+import { getCurrentApiConfig, resolveCurrentApiConfig, setStoreGetter } from './libs/claudeSettings'
+import { generateSessionTitle, probeCoworkModelReadiness } from './libs/coworkUtil'
+import { saveCoworkApiConfig } from './libs/coworkConfigStore'
+import { CoworkRunner } from './libs/coworkRunner'
+import { ScheduledTaskStore } from './scheduledTaskStore'
 
 // 设置应用程序名称
 app.name = APP_NAME
 app.setName(APP_NAME)
 
 // 🚧 Use ['ENV_NAME'] avoid vite:define plugin - Vite@2.x
-const INVALID_FILE_NAME_PATTERN = /[<>:"/\\|?*\u0000-\u001F]/g
+const INVALID_FILE_NAME_PATTERN = /[<>:"/\\|?*\u0000-\u001F]/g // 是否包含非法文件名字符
+const MIN_MEMORY_USER_MEMORIES_MAX_ITEMS = 1 // 最小用户记忆条目数
+const MAX_MEMORY_USER_MEMORIES_MAX_ITEMS = 60 // 最大用户记忆条目数
 const isDev = process.env.NODE_ENV === 'development'
 const isLinux = process.platform === 'linux'
 const isMac = process.platform === 'darwin'
@@ -128,6 +135,15 @@ const inferAttachmentExtension = (fileName: string, mimeType?: string): string =
   return ''
 }
 
+const resolveTaskWorkingDirectory = (workspaceRoot: string): string => {
+  const resolvedWorkspaceRoot = path.resolve(workspaceRoot)
+  fs.mkdirSync(resolvedWorkspaceRoot, { recursive: true })
+  if (!fs.statSync(resolvedWorkspaceRoot).isDirectory()) {
+    throw new Error(`Selected workspace is not a directory: ${resolvedWorkspaceRoot}`)
+  }
+  return resolvedWorkspaceRoot
+}
+
 // 获取正确的预加载脚本路径
 const PRELOAD_PATH = app.isPackaged ? path.join(__dirname, 'preload.js') : path.join(__dirname, '../dist-electron/preload.js')
 
@@ -145,11 +161,12 @@ let mainWindow: BrowserWindow | null = null
 const gotTheLock = isDev ? true : app.requestSingleInstanceLock()
 
 let store: SqliteStore | null = null
-let mcpStore: McpStore | null = null
 let coworkStore: CoworkStore | null = null
+let coworkRunner: CoworkRunner | null = null
 let skillManager: SkillManager | null = null
-// let scheduler: Scheduler | null = null;
-// let scheduledTaskStore: ScheduledTaskStore | null = null;
+let mcpStore: McpStore | null = null
+let scheduledTaskStore: ScheduledTaskStore | null = null
+let scheduler: Scheduler | null = null
 let storeInitPromise: Promise<SqliteStore> | null = null
 
 const initStore = async (): Promise<SqliteStore> => {
@@ -182,6 +199,110 @@ const getCoworkStore = () => {
     }
   }
   return coworkStore
+}
+
+const getCoworkRunner = () => {
+  if (!coworkRunner) {
+    coworkRunner = new CoworkRunner(getCoworkStore())
+
+    // Provide MCP server configuration to the runner
+    coworkRunner.setMcpServerProvider(() => {
+      return getMcpStore().getEnabledServers()
+    })
+
+    // Set up event listeners to forward to renderer
+    coworkRunner.on('message', (sessionId: string, message: any) => {
+      // Debug: log user messages with metadata to trace imageAttachments
+      if (message?.type === 'user') {
+        const meta = message.metadata
+        console.log('[main] coworkRunner message event (user)', {
+          sessionId,
+          messageId: message.id,
+          hasMetadata: !!meta,
+          metadataKeys: meta ? Object.keys(meta) : [],
+          hasImageAttachments: !!meta?.imageAttachments,
+          imageAttachmentsCount: Array.isArray(meta?.imageAttachments) ? meta.imageAttachments.length : 0,
+          imageAttachmentsBase64Lengths: Array.isArray(meta?.imageAttachments)
+            ? meta.imageAttachments.map((a: any) => a?.base64Data?.length ?? 0)
+            : []
+        })
+      }
+      const safeMessage = sanitizeCoworkMessageForIpc(message)
+      // Debug: check sanitized result
+      if (message?.type === 'user') {
+        const safeMeta = safeMessage?.metadata
+        console.log('[main] sanitized user message', {
+          hasMetadata: !!safeMeta,
+          metadataKeys: safeMeta ? Object.keys(safeMeta) : [],
+          hasImageAttachments: !!safeMeta?.imageAttachments,
+          imageAttachmentsCount: Array.isArray(safeMeta?.imageAttachments) ? safeMeta.imageAttachments.length : 0,
+          imageAttachmentsBase64Lengths: Array.isArray(safeMeta?.imageAttachments)
+            ? safeMeta.imageAttachments.map((a: any) => a?.base64Data?.length ?? 0)
+            : []
+        })
+      }
+      const windows = BrowserWindow.getAllWindows()
+      windows.forEach((win) => {
+        if (!win.isDestroyed()) {
+          try {
+            win.webContents.send('cowork:stream:message', { sessionId, message: safeMessage })
+          } catch (error) {
+            console.error('Failed to forward cowork message:', error)
+          }
+        }
+      })
+    })
+
+    coworkRunner.on('messageUpdate', (sessionId: string, messageId: string, content: string) => {
+      const safeContent = truncateIpcString(content, IPC_UPDATE_CONTENT_MAX_CHARS)
+      const windows = BrowserWindow.getAllWindows()
+      windows.forEach((win) => {
+        if (!win.isDestroyed()) {
+          try {
+            win.webContents.send('cowork:stream:messageUpdate', { sessionId, messageId, content: safeContent })
+          } catch (error) {
+            console.error('Failed to forward cowork message update:', error)
+          }
+        }
+      })
+    })
+
+    coworkRunner.on('permissionRequest', (sessionId: string, request: any) => {
+      if (coworkRunner?.getSessionConfirmationMode(sessionId) === 'text') {
+        return
+      }
+      const safeRequest = sanitizePermissionRequestForIpc(request)
+      const windows = BrowserWindow.getAllWindows()
+      windows.forEach((win) => {
+        if (!win.isDestroyed()) {
+          try {
+            win.webContents.send('cowork:stream:permission', { sessionId, request: safeRequest })
+          } catch (error) {
+            console.error('Failed to forward cowork permission request:', error)
+          }
+        }
+      })
+    })
+
+    coworkRunner.on('complete', (sessionId: string, claudeSessionId: string | null) => {
+      const windows = BrowserWindow.getAllWindows()
+      windows.forEach((win) => {
+        if (!win.isDestroyed()) {
+          win.webContents.send('cowork:stream:complete', { sessionId, claudeSessionId })
+        }
+      })
+    })
+
+    coworkRunner.on('error', (sessionId: string, error: string) => {
+      const windows = BrowserWindow.getAllWindows()
+      windows.forEach((win) => {
+        if (!win.isDestroyed()) {
+          win.webContents.send('cowork:stream:error', { sessionId, error })
+        }
+      })
+    })
+  }
+  return coworkRunner
 }
 
 /* ------------------- MCP ------------------- */
@@ -415,6 +536,24 @@ if (!gotTheLock) {
     }
   })
 
+  ipcMain.handle('skills:getRoot', () => {
+    try {
+      const root = getSkillManager().getSkillsRoot()
+      return { success: true, path: root }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to resolve skills root' }
+    }
+  })
+
+  ipcMain.handle('skills:autoRoutingPrompt', () => {
+    try {
+      const prompt = getSkillManager().buildAutoRoutingPrompt()
+      return { success: true, prompt }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to build auto-routing prompt' }
+    }
+  })
+
   /* ------------------- Scheduled Task IPC Handlers ------------------- */
   // TODO:
 
@@ -471,6 +610,329 @@ if (!gotTheLock) {
   )
 
   /* ------------------- cowork IPC handlers ------------------- */
+  ipcMain.handle(
+    'cowork:session:start',
+    async (
+      _event,
+      options: {
+        prompt: string
+        cwd?: string
+        systemPrompt?: string
+        title?: string
+        activeSkillIds?: string[]
+        imageAttachments?: Array<{ name: string; mimeType: string; base64Data: string }>
+      }
+    ) => {
+      try {
+        const coworkStoreInstance = getCoworkStore()
+        const config = coworkStoreInstance.getConfig()
+        const systemPrompt = options.systemPrompt ?? config.systemPrompt
+        const selectedWorkspaceRoot = (options.cwd || config.workingDirectory || '').trim()
+
+        if (!selectedWorkspaceRoot) {
+          return {
+            success: false,
+            error: 'Please select a task folder before submitting.'
+          }
+        }
+
+        // Generate title from first line of prompt
+        const fallbackTitle = options.prompt.split('\n')[0].slice(0, 50) || 'New Session'
+        const title = options.title?.trim() || fallbackTitle
+        const taskWorkingDirectory = resolveTaskWorkingDirectory(selectedWorkspaceRoot)
+
+        const session = coworkStoreInstance.createSession(
+          title,
+          taskWorkingDirectory,
+          systemPrompt,
+          config.executionMode || 'local',
+          options.activeSkillIds || []
+        )
+        // Build metadata, include imageAttachments if present
+        const messageMetadata: Record<string, unknown> = {}
+        if (options.activeSkillIds?.length) {
+          messageMetadata.skillIds = options.activeSkillIds
+        }
+        if (options.imageAttachments?.length) {
+          messageMetadata.imageAttachments = options.imageAttachments
+        }
+        coworkStoreInstance.addMessage(session.id, {
+          type: 'user',
+          content: options.prompt,
+          metadata: Object.keys(messageMetadata).length > 0 ? messageMetadata : undefined
+        })
+
+        const probe = await probeCoworkModelReadiness()
+        if (probe.ok === false) {
+          coworkStoreInstance.updateSession(session.id, { status: 'error' })
+          coworkStoreInstance.addMessage(session.id, {
+            type: 'system',
+            content: `Error: ${probe.error}`,
+            metadata: { error: probe.error }
+          })
+          const failedSession = coworkStoreInstance.getSession(session.id) || {
+            ...session,
+            status: 'error' as const
+          }
+          return { success: true, session: failedSession }
+        }
+
+        const runner = getCoworkRunner()
+
+        // Update session status to 'running' before starting async task
+        // This ensures the frontend receives the correct status immediately
+        coworkStoreInstance.updateSession(session.id, { status: 'running' })
+
+        // Start the session asynchronously (skip initial user message since we already added it)
+        runner
+          .startSession(session.id, options.prompt, {
+            skipInitialUserMessage: true,
+            skillIds: options.activeSkillIds,
+            workspaceRoot: selectedWorkspaceRoot,
+            confirmationMode: 'modal',
+            imageAttachments: options.imageAttachments
+          })
+          .catch((error) => {
+            console.error('Cowork session error:', error)
+          })
+
+        const sessionWithMessages = coworkStoreInstance.getSession(session.id) || {
+          ...session,
+          status: 'running' as const
+        }
+        return { success: true, session: sessionWithMessages }
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to start session'
+        }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'cowork:session:continue',
+    async (
+      _event,
+      options: {
+        sessionId: string
+        prompt: string
+        systemPrompt?: string
+        activeSkillIds?: string[]
+        imageAttachments?: Array<{ name: string; mimeType: string; base64Data: string }>
+      }
+    ) => {
+      try {
+        console.log('[main] cowork:session:continue handler', {
+          sessionId: options.sessionId,
+          hasImageAttachments: !!options.imageAttachments,
+          imageAttachmentsCount: options.imageAttachments?.length ?? 0,
+          imageAttachmentsNames: options.imageAttachments?.map((a) => a.name)
+        })
+        const runner = getCoworkRunner()
+        runner
+          .continueSession(options.sessionId, options.prompt, {
+            systemPrompt: options.systemPrompt,
+            skillIds: options.activeSkillIds,
+            imageAttachments: options.imageAttachments
+          })
+          .catch((error) => {
+            console.error('Cowork continue error:', error)
+          })
+
+        const session = getCoworkStore().getSession(options.sessionId)
+        return { success: true, session }
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to continue session'
+        }
+      }
+    }
+  )
+
+  ipcMain.handle('cowork:session:stop', async (_event, sessionId: string) => {
+    try {
+      const runner = getCoworkRunner()
+      runner.stopSession(sessionId)
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to stop session'
+      }
+    }
+  })
+
+  ipcMain.handle('cowork:session:delete', async (_event, sessionId: string) => {
+    try {
+      const coworkStoreInstance = getCoworkStore()
+      coworkStoreInstance.deleteSession(sessionId)
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to delete session'
+      }
+    }
+  })
+
+  ipcMain.handle('cowork:session:deleteBatch', async (_event, sessionIds: string[]) => {
+    try {
+      const coworkStoreInstance = getCoworkStore()
+      coworkStoreInstance.deleteSessions(sessionIds)
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to batch delete sessions'
+      }
+    }
+  })
+
+  ipcMain.handle('cowork:session:pin', async (_event, options: { sessionId: string; pinned: boolean }) => {
+    try {
+      const coworkStoreInstance = getCoworkStore()
+      coworkStoreInstance.setSessionPinned(options.sessionId, options.pinned)
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to update session pin'
+      }
+    }
+  })
+
+  ipcMain.handle('cowork:session:rename', async (_event, options: { sessionId: string; title: string }) => {
+    try {
+      const title = options.title.trim()
+      if (!title) {
+        return { success: false, error: 'Title is required' }
+      }
+      const coworkStoreInstance = getCoworkStore()
+      coworkStoreInstance.updateSession(options.sessionId, { title })
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to rename session'
+      }
+    }
+  })
+
+  ipcMain.handle('cowork:session:get', async (_event, sessionId: string) => {
+    try {
+      const session = getCoworkStore().getSession(sessionId)
+      return { success: true, session }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get session'
+      }
+    }
+  })
+
+  ipcMain.handle('cowork:session:list', async () => {
+    try {
+      const sessions = getCoworkStore().listSessions()
+      return { success: true, sessions }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to list sessions'
+      }
+    }
+  })
+
+  ipcMain.handle(
+    'cowork:session:exportResultImage',
+    async (
+      event,
+      options: {
+        rect: { x: number; y: number; width: number; height: number }
+        defaultFileName?: string
+      }
+    ) => {
+      try {
+        const { rect, defaultFileName } = options || {}
+        const captureRect = normalizeCaptureRect(rect)
+        if (!captureRect) {
+          return { success: false, error: 'Capture rect is required' }
+        }
+
+        const image = await event.sender.capturePage(captureRect)
+        return savePngWithDialog(event.sender, image.toPNG(), defaultFileName)
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to export session image'
+        }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'cowork:session:captureImageChunk',
+    async (
+      event,
+      options: {
+        rect: { x: number; y: number; width: number; height: number }
+      }
+    ) => {
+      try {
+        const captureRect = normalizeCaptureRect(options?.rect)
+        if (!captureRect) {
+          return { success: false, error: 'Capture rect is required' }
+        }
+
+        const image = await event.sender.capturePage(captureRect)
+        const pngBuffer = image.toPNG()
+
+        return {
+          success: true,
+          width: captureRect.width,
+          height: captureRect.height,
+          pngBase64: pngBuffer.toString('base64')
+        }
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to capture session image chunk'
+        }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'cowork:session:saveResultImage',
+    async (
+      event,
+      options: {
+        pngBase64: string
+        defaultFileName?: string
+      }
+    ) => {
+      try {
+        const base64 = typeof options?.pngBase64 === 'string' ? options.pngBase64.trim() : ''
+        if (!base64) {
+          return { success: false, error: 'Image data is required' }
+        }
+
+        const pngBuffer = Buffer.from(base64, 'base64')
+        if (pngBuffer.length <= 0) {
+          return { success: false, error: 'Invalid image data' }
+        }
+
+        return savePngWithDialog(event.sender, pngBuffer, options?.defaultFileName)
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to save session image'
+        }
+      }
+    }
+  )
+
   ipcMain.handle(
     'cowork:memory:createEntry',
     async (
@@ -605,6 +1067,74 @@ if (!gotTheLock) {
     }
   })
 
+  ipcMain.handle('cowork:config:get', async () => {
+    try {
+      const config = getCoworkStore().getConfig()
+      return { success: true, config }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get config'
+      }
+    }
+  })
+
+  ipcMain.handle(
+    'cowork:config:set',
+    async (
+      _event,
+      config: {
+        workingDirectory?: string
+        executionMode?: 'auto' | 'local' | 'sandbox'
+        memoryEnabled?: boolean
+        memoryImplicitUpdateEnabled?: boolean
+        memoryLlmJudgeEnabled?: boolean
+        memoryGuardLevel?: 'strict' | 'standard' | 'relaxed'
+        memoryUserMemoriesMaxItems?: number
+      }
+    ) => {
+      try {
+        const normalizedExecutionMode =
+          config.executionMode && String(config.executionMode) === 'container' ? 'sandbox' : config.executionMode
+        const normalizedMemoryEnabled = typeof config.memoryEnabled === 'boolean' ? config.memoryEnabled : undefined
+        const normalizedMemoryImplicitUpdateEnabled =
+          typeof config.memoryImplicitUpdateEnabled === 'boolean' ? config.memoryImplicitUpdateEnabled : undefined
+        const normalizedMemoryLlmJudgeEnabled = typeof config.memoryLlmJudgeEnabled === 'boolean' ? config.memoryLlmJudgeEnabled : undefined
+        const normalizedMemoryGuardLevel =
+          config.memoryGuardLevel === 'strict' || config.memoryGuardLevel === 'standard' || config.memoryGuardLevel === 'relaxed'
+            ? config.memoryGuardLevel
+            : undefined
+        const normalizedMemoryUserMemoriesMaxItems =
+          typeof config.memoryUserMemoriesMaxItems === 'number' && Number.isFinite(config.memoryUserMemoriesMaxItems)
+            ? Math.max(
+                MIN_MEMORY_USER_MEMORIES_MAX_ITEMS,
+                Math.min(MAX_MEMORY_USER_MEMORIES_MAX_ITEMS, Math.floor(config.memoryUserMemoriesMaxItems))
+              )
+            : undefined
+        const normalizedConfig = {
+          ...config,
+          executionMode: normalizedExecutionMode,
+          memoryEnabled: normalizedMemoryEnabled,
+          memoryImplicitUpdateEnabled: normalizedMemoryImplicitUpdateEnabled,
+          memoryLlmJudgeEnabled: normalizedMemoryLlmJudgeEnabled,
+          memoryGuardLevel: normalizedMemoryGuardLevel,
+          memoryUserMemoriesMaxItems: normalizedMemoryUserMemoriesMaxItems
+        }
+        const previousWorkingDir = getCoworkStore().getConfig().workingDirectory
+        getCoworkStore().setConfig(normalizedConfig)
+        if (normalizedConfig.workingDirectory !== undefined && normalizedConfig.workingDirectory !== previousWorkingDir) {
+          getSkillManager().handleWorkingDirectoryChange()
+        }
+        return { success: true }
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to set config'
+        }
+      }
+    }
+  )
+
   /* ------------------- Shell IPC handlers ------------------- */
   // 打开文件/文件夹
   ipcMain.handle('shell:openPath', async (_event, filePath: string) => {
@@ -721,6 +1251,49 @@ if (!gotTheLock) {
   })
 
   /* ------------------- Dialog IPC handlers ------------------- */
+  // Read a local file as a data URL (data:<mime>;base64,...)
+  const MAX_READ_AS_DATA_URL_BYTES = 20 * 1024 * 1024
+  const MIME_BY_EXT: Record<string, string> = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.bmp': 'image/bmp',
+    '.svg': 'image/svg+xml'
+  }
+  ipcMain.handle(
+    'dialog:readFileAsDataUrl',
+    async (_event, filePath?: string): Promise<{ success: boolean; dataUrl?: string; error?: string }> => {
+      try {
+        if (typeof filePath !== 'string' || !filePath.trim()) {
+          return { success: false, error: 'Missing file path' }
+        }
+        const resolvedPath = path.resolve(filePath.trim())
+        const stat = await fs.promises.stat(resolvedPath)
+        if (!stat.isFile()) {
+          return { success: false, error: 'Not a file' }
+        }
+        if (stat.size > MAX_READ_AS_DATA_URL_BYTES) {
+          return {
+            success: false,
+            error: `File too large (max ${Math.floor(MAX_READ_AS_DATA_URL_BYTES / (1024 * 1024))}MB)`
+          }
+        }
+        const buffer = await fs.promises.readFile(resolvedPath)
+        const ext = path.extname(resolvedPath).toLowerCase()
+        const mimeType = MIME_BY_EXT[ext] || 'application/octet-stream'
+        const base64 = buffer.toString('base64')
+        return { success: true, dataUrl: `data:${mimeType};base64,${base64}` }
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to read file'
+        }
+      }
+    }
+  )
+
   ipcMain.handle('dialog:selectDirectory', async (event) => {
     const ownerWindow = BrowserWindow.fromWebContents(event.sender)
     const dialogOptions = {
@@ -789,6 +1362,54 @@ if (!gotTheLock) {
       }
     }
   )
+
+  /* ------------------- Config IPC handlers ------------------- */
+  ipcMain.handle('get-api-config', async () => {
+    return getCurrentApiConfig()
+  })
+
+  ipcMain.handle('check-api-config', async (_event, options?: { probeModel?: boolean }) => {
+    const { config, error } = resolveCurrentApiConfig()
+    if (config && options?.probeModel) {
+      const probe = await probeCoworkModelReadiness()
+      if (probe.ok === false) {
+        return { hasConfig: false, config: null, error: probe.error }
+      }
+    }
+    return { hasConfig: config !== null, config, error }
+  })
+
+  ipcMain.handle(
+    'save-api-config',
+    async (
+      _event,
+      config: {
+        apiKey: string
+        baseURL: string
+        model: string
+        apiType?: 'anthropic' | 'openai'
+      }
+    ) => {
+      try {
+        saveCoworkApiConfig(config)
+        return { success: true }
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to save API config'
+        }
+      }
+    }
+  )
+
+  ipcMain.handle('generate-session-title', async (_event, userInput: string | null) => {
+    return generateSessionTitle(userInput)
+  })
+
+  ipcMain.handle('get-recent-cwds', async (_event, limit?: number) => {
+    const boundedLimit = limit ? Math.min(Math.max(limit, 1), 20) : 8
+    return getCoworkStore().listRecentCwds(boundedLimit)
+  })
 
   ipcMain.handle('app:getVersion', () => app.getVersion())
   ipcMain.handle('app:getSystemLocale', () => app.getLocale())
@@ -983,6 +1604,12 @@ if (!gotTheLock) {
 
     store = await initStore()
     console.log('[Main] initApp: store initialized')
+
+    // Inject store getter into claudeSettings
+    setStoreGetter(() => store)
+    console.log('[Main] initApp: setStoreGetter done')
+    // const manager = getSkillManager()
+    // console.log('[Main] initApp: getSkillManager done')
 
     // 设置安全策略
     setContentSecurityPolicy()

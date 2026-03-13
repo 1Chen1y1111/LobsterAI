@@ -277,8 +277,8 @@ export const defaultConfig: AppConfig = {
       ]
     },
     deepseek: {
-      enabled: false,
-      apiKey: '',
+      enabled: true,
+      apiKey: 'sk_xxx',
       baseUrl: 'https://api.deepseek.com/anthropic',
       apiFormat: 'anthropic',
       models: [

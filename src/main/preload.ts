@@ -104,6 +104,35 @@ contextBridge.exposeInMainWorld('electron', {
     }
   },
   cowork: {
+    // Session management
+    startSession: (options: {
+      prompt: string
+      cwd?: string
+      systemPrompt?: string
+      activeSkillIds?: string[]
+      imageAttachments?: Array<{ name: string; mimeType: string; base64Data: string }>
+    }) => ipcRenderer.invoke('cowork:session:start', options),
+    continueSession: (options: {
+      sessionId: string
+      prompt: string
+      systemPrompt?: string
+      activeSkillIds?: string[]
+      imageAttachments?: Array<{ name: string; mimeType: string; base64Data: string }>
+    }) => ipcRenderer.invoke('cowork:session:continue', options),
+    stopSession: (sessionId: string) => ipcRenderer.invoke('cowork:session:stop', sessionId),
+    deleteSession: (sessionId: string) => ipcRenderer.invoke('cowork:session:delete', sessionId),
+    deleteSessions: (sessionIds: string[]) => ipcRenderer.invoke('cowork:session:deleteBatch', sessionIds),
+    setSessionPinned: (options: { sessionId: string; pinned: boolean }) => ipcRenderer.invoke('cowork:session:pin', options),
+    renameSession: (options: { sessionId: string; title: string }) => ipcRenderer.invoke('cowork:session:rename', options),
+    getSession: (sessionId: string) => ipcRenderer.invoke('cowork:session:get', sessionId),
+    listSessions: () => ipcRenderer.invoke('cowork:session:list'),
+    exportResultImage: (options: { rect: { x: number; y: number; width: number; height: number }; defaultFileName?: string }) =>
+      ipcRenderer.invoke('cowork:session:exportResultImage', options),
+    captureImageChunk: (options: { rect: { x: number; y: number; width: number; height: number } }) =>
+      ipcRenderer.invoke('cowork:session:captureImageChunk', options),
+    saveResultImage: (options: { pngBase64: string; defaultFileName?: string }) =>
+      ipcRenderer.invoke('cowork:session:saveResultImage', options),
+
     getMemoryStats: () => ipcRenderer.invoke('cowork:memory:getStats'),
     deleteMemoryEntry: (input: { id: string }) => ipcRenderer.invoke('cowork:memory:deleteEntry', input),
     createMemoryEntry: (input: { text: string; confidence?: number; isExplicit?: boolean }) =>
@@ -123,7 +152,19 @@ contextBridge.exposeInMainWorld('electron', {
       offset?: number
     }) => ipcRenderer.invoke('cowork:memory:listEntries', input),
     getSandboxStatus: () => ipcRenderer.invoke('cowork:sandbox:status'),
-    installSandbox: () => ipcRenderer.invoke('cowork:sandbox:install')
+    installSandbox: () => ipcRenderer.invoke('cowork:sandbox:install'),
+
+    // Configuration
+    getConfig: () => ipcRenderer.invoke('cowork:config:get'),
+    setConfig: (config: {
+      workingDirectory?: string
+      executionMode?: 'auto' | 'local' | 'sandbox'
+      memoryEnabled?: boolean
+      memoryImplicitUpdateEnabled?: boolean
+      memoryLlmJudgeEnabled?: boolean
+      memoryGuardLevel?: 'strict' | 'standard' | 'relaxed'
+      memoryUserMemoriesMaxItems?: number
+    }) => ipcRenderer.invoke('cowork:config:set', config)
   },
   appInfo: {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
@@ -180,5 +221,11 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.on('scheduledTask:runUpdate', handler)
       return () => ipcRenderer.removeListener('scheduledTask:runUpdate', handler)
     }
-  }
+  },
+  getApiConfig: () => ipcRenderer.invoke('get-api-config'),
+  checkApiConfig: (options?: { probeModel?: boolean }) => ipcRenderer.invoke('check-api-config', options),
+  saveApiConfig: (config: { apiKey: string; baseURL: string; model: string; apiType?: 'anthropic' | 'openai' }) =>
+    ipcRenderer.invoke('save-api-config', config),
+  generateSessionTitle: (userInput: string | null) => ipcRenderer.invoke('generate-session-title', userInput),
+  getRecentCwds: (limit?: number) => ipcRenderer.invoke('get-recent-cwds', limit)
 })
