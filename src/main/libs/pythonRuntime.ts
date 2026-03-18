@@ -1,16 +1,33 @@
+/**
+ * 这个文件负责管理 Windows 下随应用分发的 Python runtime。
+ *
+ * 主要职责：
+ * 1. 发现应用内置 Python runtime 和 userData 下的用户 runtime。
+ * 2. 在首次运行或 runtime 损坏时，把内置 runtime 同步到 userData。
+ * 3. 修复 embeddable Python 的 `_pth` 配置，确保 `site-packages` 和 `import site` 可用。
+ * 4. 把 Python 与 Scripts 目录追加到子进程环境变量里。
+ * 5. 在需要时尝试通过 `ensurepip` 恢复 pip 能力。
+ */
+
 import { app } from 'electron';
 import { spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { cpRecursiveSync } from '../fsCompat';
 
+// 应用内置 Python runtime 在 resources/userData 中使用的目录名。
 const PYTHON_RUNTIME_DIR_NAME = 'python-win';
+
+// 记录 runtime 同步状态的元数据文件名。
 const PYTHON_RUNTIME_STATE_FILE = 'runtime.json';
 
+// 判断 runtime 是否基本可用所需的核心可执行文件。
 const REQUIRED_FILES = [
   'python.exe',
   'python3.exe',
 ];
+
+// 可能存在的 pip 可执行文件相对路径。
 const PIP_EXECUTABLE_CANDIDATES = [
   path.join('Scripts', 'pip.exe'),
   path.join('Scripts', 'pip3.exe'),
@@ -19,13 +36,19 @@ const PIP_EXECUTABLE_CANDIDATES = [
   path.join('Scripts', 'pip'),
   path.join('Scripts', 'pip3'),
 ];
+
+// pip 模块主入口的相对路径。
 const PIP_MODULE_MAIN_REL_PATH = path.join('Lib', 'site-packages', 'pip', '__main__.py');
+
+// pip 模块初始化文件的相对路径。
 const PIP_MODULE_INIT_REL_PATH = path.join('Lib', 'site-packages', 'pip', '__init__.py');
 
+// 判断 runtime 下是否存在任意一种 pip 命令入口。
 function hasPipExecutable(rootDir: string): boolean {
   return PIP_EXECUTABLE_CANDIDATES.some((relPath) => fs.existsSync(path.join(rootDir, relPath)));
 }
 
+// 判断 runtime 是否具备“pip 命令 + pip 模块”两层支持。
 function hasPipSupport(rootDir: string): boolean {
   const hasCommand = hasPipExecutable(rootDir);
   const hasModuleShim =
@@ -34,6 +57,7 @@ function hasPipSupport(rootDir: string): boolean {
   return hasCommand && hasModuleShim;
 }
 
+// 在 runtime 根目录里寻找首个可用的 Python 可执行文件。
 function findPythonExecutable(rootDir: string): string | null {
   const candidates = [
     path.join(rootDir, 'python.exe'),
@@ -47,6 +71,7 @@ function findPythonExecutable(rootDir: string): string | null {
   return null;
 }
 
+// 读取 embeddable Python 的 `._pth` 配置文件列表。
 function readEmbedPthFiles(rootDir: string): string[] {
   try {
     return fs.readdirSync(rootDir).filter((name) => name.endsWith('._pth'));
@@ -55,6 +80,7 @@ function readEmbedPthFiles(rootDir: string): string[] {
   }
 }
 
+// 确保 embeddable Python 的 `._pth` 中启用了 site-packages 和 `import site`。
 function ensureEmbedSitePackages(rootDir: string): void {
   const pthFiles = readEmbedPthFiles(rootDir);
   if (pthFiles.length === 0) {
@@ -96,6 +122,7 @@ function ensureEmbedSitePackages(rootDir: string): void {
   }
 }
 
+// 以 Windows PATH 语义合并目录并去重。
 function appendWindowsPath(current: string | undefined, entries: string[]): string | undefined {
   const delimiter = ';';
   const seen = new Set<string>();
@@ -116,6 +143,7 @@ function appendWindowsPath(current: string | undefined, entries: string[]): stri
   return merged.length > 0 ? merged.join(delimiter) : current;
 }
 
+// 检查某个 runtime 是否健康，支持按需要求 pip 和 `_pth` 配置完整性。
 function runtimeHealth(
   rootDir: string,
   options: { requireEmbedSiteConfig?: boolean; requirePip?: boolean } = {}
@@ -168,6 +196,7 @@ function runtimeHealth(
   };
 }
 
+// 根据核心文件的大小和时间戳生成一个 runtime 签名。
 function computeRuntimeSignature(rootDir: string): string {
   const parts: string[] = [];
   for (const relPath of REQUIRED_FILES) {
@@ -182,6 +211,7 @@ function computeRuntimeSignature(rootDir: string): string {
   return parts.join('|');
 }
 
+// 在 user runtime 下写入状态文件，记录同步来源和签名。
 function ensureRuntimeStateFile(runtimeRoot: string, sourceRoot: string): void {
   const statePath = path.join(runtimeRoot, PYTHON_RUNTIME_STATE_FILE);
   const payload = {
@@ -192,6 +222,7 @@ function ensureRuntimeStateFile(runtimeRoot: string, sourceRoot: string): void {
   fs.writeFileSync(statePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
 }
 
+// 解析内置 Python runtime 的候选目录，兼容开发态和打包态。
 function resolveBundledCandidates(): string[] {
   if (app.isPackaged) {
     return [
@@ -208,6 +239,7 @@ function resolveBundledCandidates(): string[] {
   ];
 }
 
+// 获取应用内置 Python runtime 根目录；找不到时返回 null。
 export function getBundledPythonRoot(): string | null {
   const candidates = resolveBundledCandidates();
   for (const candidate of candidates) {
@@ -218,10 +250,12 @@ export function getBundledPythonRoot(): string | null {
   return null;
 }
 
+// 获取 userData 下用户 Python runtime 的固定目录。
 export function getUserPythonRoot(): string {
   return path.join(app.getPath('userData'), 'runtimes', PYTHON_RUNTIME_DIR_NAME);
 }
 
+// 把 Python runtime 根目录和 Scripts 目录追加到环境变量中。
 export function appendPythonRuntimeToEnv(env: Record<string, string | undefined>): Record<string, string | undefined> {
   if (process.platform !== 'win32') {
     return env;
@@ -244,6 +278,7 @@ export function appendPythonRuntimeToEnv(env: Record<string, string | undefined>
   return env;
 }
 
+// 确保 Windows 用户 runtime 已就绪；必要时从内置 runtime 同步一份到 userData。
 export async function ensurePythonRuntimeReady(): Promise<{ success: boolean; error?: string }> {
   if (process.platform !== 'win32') {
     return { success: true };
@@ -310,6 +345,7 @@ export async function ensurePythonRuntimeReady(): Promise<{ success: boolean; er
   }
 }
 
+// 用指定 Python 可执行文件在 runtime 目录中运行一条命令。
 function runPythonCommand(
   pythonExe: string,
   args: string[],
@@ -333,6 +369,7 @@ function runPythonCommand(
   return { ok: false, detail: detail || `exit code ${String(result.status)}` };
 }
 
+// 通过 `python -m ensurepip --upgrade` 尝试恢复 pip 支持。
 function tryBootstrapPip(rootDir: string): { ok: boolean; detail?: string } {
   const pythonExe = findPythonExecutable(rootDir);
   if (!pythonExe) {
@@ -352,6 +389,7 @@ function tryBootstrapPip(rootDir: string): { ok: boolean; detail?: string } {
   return { ok: true };
 }
 
+// 确保用户 runtime 里的 pip 可用；必要时尝试用 ensurepip 自举恢复。
 export async function ensurePythonPipReady(): Promise<{ success: boolean; error?: string }> {
   if (process.platform !== 'win32') {
     return { success: true };

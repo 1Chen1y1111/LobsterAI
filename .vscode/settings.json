@@ -3,9 +3,13 @@
     "asar",
     "Bigram",
     "cowork",
+    "Cwds",
+    "cylobsterai",
     "deepseek",
+    "dingtalk",
     "Emscripten",
     "generativelanguage",
+    "Kimi",
     "lobsterai",
     "NSIS",
     "Ollama",
@@ -13,6 +17,7 @@
     "Qwen",
     "unmaximize",
     "uuidv",
+    "Virtio",
     "Volcengine",
     "Zhipu"
   ]

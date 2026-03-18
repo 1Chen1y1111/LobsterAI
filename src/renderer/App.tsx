@@ -9,12 +9,18 @@ import Sidebar from './components/Sidebar'
 import { CoworkView } from './components/cowork'
 import { apiService } from './services/api'
 import { setAvailableModels } from './store/slices/modelSlice'
-import { useDispatch } from 'react-redux'
+import { useDispatch, useSelector } from 'react-redux'
 import SkillsView from './components/skills/SkillsView'
 import { ScheduledTasksView } from './components/scheduledTasks'
 import { McpView } from './components/mcp'
+import { coworkService } from './services/cowork'
+import { clearSelection } from './store/slices/quickActionSlice'
+import { RootState } from './store'
 
 const App: React.FC = () => {
+  const dispatch = useDispatch()
+  const currentSessionId = useSelector((state: RootState) => state.cowork.currentSessionId)
+
   const [showSettings, setShowSettings] = useState(false)
   const [settingsOptions, setSettingsOptions] = useState<SettingsOpenOptions>({})
   const [mainView, setMainView] = useState<'cowork' | 'skills' | 'scheduledTasks' | 'mcp'>('cowork')
@@ -24,11 +30,18 @@ const App: React.FC = () => {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
   const [showUpdateModal, setShowUpdateModal] = useState(false)
 
-  const dispatch = useDispatch()
-
+  const toastTimerRef = useRef<number | null>(null)
   const hasInitialized = useRef(false)
 
   const isWindows = window.electron.platform === 'win32'
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        window.clearTimeout(toastTimerRef.current)
+      }
+    }
+  }, [])
 
   // 初始化应用
   useEffect(() => {
@@ -96,18 +109,33 @@ const App: React.FC = () => {
   }, [])
 
   const handleNewChat = useCallback(() => {
-    // const shouldClearInput = mainView === 'cowork' || !!currentSessionId
-    // coworkService.clearSession()
-    // dispatch(clearSelection())
-    // setMainView('cowork')
-    // window.setTimeout(() => {
-    //   window.dispatchEvent(
-    //     new CustomEvent('cowork:focus-input', {
-    //       detail: { clear: shouldClearInput }
-    //     })
-    //   )
-    // }, 0)
+    const shouldClearInput = mainView === 'cowork' || !!currentSessionId
+    coworkService.clearSession()
+    dispatch(clearSelection())
+    setMainView('cowork')
+    window.setTimeout(() => {
+      window.dispatchEvent(
+        new CustomEvent('cowork:focus-input', {
+          detail: { clear: shouldClearInput }
+        })
+      )
+    }, 0)
   }, [dispatch, mainView])
+
+  const showToast = useCallback((message: string) => {
+    setToastMessage(message)
+    if (toastTimerRef.current) {
+      window.clearTimeout(toastTimerRef.current)
+    }
+    toastTimerRef.current = window.setTimeout(() => {
+      setToastMessage(null)
+      toastTimerRef.current = null
+    }, 2200)
+  }, [])
+
+  const handleShowLogin = useCallback(() => {
+    showToast(i18nService.t('featureInDevelopment'))
+  }, [showToast])
 
   const handleShowScheduledTasks = useCallback(() => {
     setMainView('scheduledTasks')
@@ -183,13 +211,14 @@ const App: React.FC = () => {
 
       <div className="flex flex-1 min-h-0 overflow-hidden">
         <Sidebar
+          onShowLogin={handleShowLogin}
+          onShowSettings={handleShowSettings}
           activeView={mainView}
-          onNewChat={handleNewChat}
-          onShowMcp={handleShowMcp}
-          onShowScheduledTasks={handleShowScheduledTasks}
           onShowSkills={handleShowSkills}
           onShowCowork={handleShowCowork}
-          onShowSettings={handleShowSettings}
+          onShowScheduledTasks={handleShowScheduledTasks}
+          onShowMcp={handleShowMcp}
+          onNewChat={handleNewChat}
           isCollapsed={isSidebarCollapsed}
           onToggleCollapse={handleToggleSidebar}
         />
@@ -207,6 +236,8 @@ const App: React.FC = () => {
                 onRequestAppSettings={handleShowSettings}
                 isSidebarCollapsed={isSidebarCollapsed}
                 onToggleSidebar={handleToggleSidebar}
+                onShowSkills={handleShowSkills}
+                onNewChat={handleNewChat}
               />
             )}
           </div>

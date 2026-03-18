@@ -12,12 +12,12 @@ type ChangePayload<T = unknown> = {
   oldValue: T | undefined
 }
 
+// 标记“旧版记忆文件迁移到 user_memories”是否已完成。
 const USER_MEMORIES_MIGRATION_KEY = 'userMemories.migration.v1.completed'
 
-// Pre-read the sql.js WASM binary from disk.
-// Using fs.readFileSync (which handles non-ASCII paths via Windows wide-char APIs)
-// and passing the buffer directly to initSqlJs bypasses Emscripten's file loading,
-// which can fail or hang when the install path contains Chinese characters on Windows.
+// 预先从磁盘读取 sql.js 的 WASM 二进制。
+// 使用 fs.readFileSync（Windows 下可正确处理非 ASCII 路径）后直接传给 initSqlJs，
+// 可绕过 Emscripten 默认的文件加载流程，避免安装路径含中文时出现失败或卡死。
 function loadWasmBinary(): ArrayBuffer {
   const wasmPath = app.isPackaged
     ? path.join(process.resourcesPath, 'app.asar.unpacked/node_modules/sql.js/dist/sql-wasm.wasm')
@@ -27,21 +27,27 @@ function loadWasmBinary(): ArrayBuffer {
 }
 
 export class SqliteStore {
+  // SQL.js 数据库实例。
   private db: Database
+  // SQLite 文件落盘路径。
   private dbPath: string
+  // 键值变更事件分发器。
   private emitter = new EventEmitter()
+  // SQL.js 初始化 Promise 缓存，避免重复初始化 WASM。
   private static sqlPromise: Promise<SqlJsStatic> | null = null
 
+  // 构造函数：通过静态工厂 create 统一创建实例。
   private constructor(db: Database, dbPath: string) {
     this.db = db
     this.dbPath = dbPath
   }
 
+  // 创建并初始化存储实例（含建表与迁移）。
   static async create(userDataPath?: string): Promise<SqliteStore> {
     const basePath = userDataPath ?? app.getPath('userData')
     const dbPath = path.join(basePath, DB_FILENAME)
 
-    // Initialize SQL.js with WASM file path (cached promise for reuse)
+    // 初始化 SQL.js（复用缓存 Promise，避免多次加载 WASM）。
     if (!SqliteStore.sqlPromise) {
       const wasmBinary = loadWasmBinary()
       SqliteStore.sqlPromise = initSqlJs({
@@ -50,7 +56,7 @@ export class SqliteStore {
     }
     const SQL = await SqliteStore.sqlPromise
 
-    // Load existing database or create new one
+    // 优先加载已有数据库文件，不存在则新建数据库。
     let db: Database
     if (fs.existsSync(dbPath)) {
       const buffer = fs.readFileSync(dbPath)
@@ -64,6 +70,7 @@ export class SqliteStore {
     return store
   }
 
+  // 初始化所有业务表、索引与历史迁移逻辑。
   private initializeTables(basePath: string) {
     this.db.run(`
       CREATE TABLE IF NOT EXISTS kv (
@@ -73,7 +80,7 @@ export class SqliteStore {
       );
     `)
 
-    // Create cowork tables
+    // 创建协作会话相关表。
     this.db.run(`
       CREATE TABLE IF NOT EXISTS cowork_sessions (
         id TEXT PRIMARY KEY,
@@ -158,7 +165,7 @@ export class SqliteStore {
       ON user_memory_sources(memory_id, is_active);
     `)
 
-    // Create scheduled tasks tables
+    // 创建定时任务相关表。
     this.db.run(`
       CREATE TABLE IF NOT EXISTS scheduled_tasks (
         id TEXT PRIMARY KEY,
@@ -209,7 +216,7 @@ export class SqliteStore {
         ON scheduled_task_runs(task_id, started_at DESC);
     `)
 
-    // Create MCP servers table
+    // 创建 MCP 服务配置表。
     this.db.run(`
       CREATE TABLE IF NOT EXISTS mcp_servers (
         id TEXT PRIMARY KEY,
@@ -223,9 +230,9 @@ export class SqliteStore {
       );
     `)
 
-    // Migrations - safely add columns if they don't exist
+    // 迁移：按需补齐缺失字段（幂等执行）。
     try {
-      // Check if execution_mode column exists
+      // 检查 cowork_sessions 的字段。
       const colsResult = this.db.exec('PRAGMA table_info(cowork_sessions);')
       const columns = colsResult[0]?.values.map((row) => row[1]) || []
 
@@ -244,7 +251,7 @@ export class SqliteStore {
         this.save()
       }
 
-      // Migration: Add sequence column to cowork_messages
+      // 迁移：为 cowork_messages 增加 sequence 字段。
       const msgColsResult = this.db.exec('PRAGMA table_info(cowork_messages);')
       const msgColumns = msgColsResult[0]?.values.map((row) => row[1]) || []
 
@@ -267,13 +274,13 @@ export class SqliteStore {
         this.save()
       }
     } catch {
-      // Column already exists or migration not needed.
+      // 字段已存在或当前版本无需迁移。
     }
 
     try {
       this.db.run('UPDATE cowork_sessions SET pinned = 0 WHERE pinned IS NULL;')
     } catch {
-      // Column might not exist yet.
+      // 旧版本可能尚未包含 pinned 字段。
     }
 
     try {
@@ -287,7 +294,7 @@ export class SqliteStore {
       console.warn('Failed to migrate cowork execution mode:', error)
     }
 
-    // Migration: Add expires_at and notify_platforms_json columns to scheduled_tasks
+    // 迁移：为 scheduled_tasks 增加 expires_at 与 notify_platforms_json 字段。
     try {
       const stColsResult = this.db.exec('PRAGMA table_info(scheduled_tasks);')
       if (stColsResult[0]) {
@@ -304,7 +311,7 @@ export class SqliteStore {
         }
       }
     } catch {
-      // Migration not needed or table doesn't exist yet.
+      // 当前无需迁移，或表尚未创建。
     }
 
     this.migrateLegacyMemoryFileToUserMemories()
@@ -312,12 +319,14 @@ export class SqliteStore {
     this.save()
   }
 
+  // 将内存数据库完整导出并同步写入磁盘文件。
   save() {
     const data = this.db.export()
     const buffer = Buffer.from(data)
     fs.writeFileSync(this.dbPath, buffer)
   }
 
+  // 订阅指定 key 的值变更，返回取消订阅函数。
   onDidChange<T = unknown>(key: string, callback: (newValue: T | undefined, oldValue: T | undefined) => void) {
     const handler = (payload: ChangePayload<T>) => {
       if (payload.key !== key) return
@@ -327,6 +336,7 @@ export class SqliteStore {
     return () => this.emitter.off('change', handler)
   }
 
+  // 从 kv 表读取并反序列化指定 key 的值。
   get<T = unknown>(key: string): T | undefined {
     const result = this.db.exec('SELECT value FROM kv WHERE key = ?', [key])
     if (!result[0]?.values[0]) return undefined
@@ -339,6 +349,7 @@ export class SqliteStore {
     }
   }
 
+  // 向 kv 表写入指定 key 的值（不存在则插入，存在则更新）。
   set<T = unknown>(key: string, value: T): void {
     const oldValue = this.get<T>(key)
     const now = Date.now()
@@ -356,6 +367,7 @@ export class SqliteStore {
     this.emitter.emit('change', { key, newValue: value, oldValue } as ChangePayload<T>)
   }
 
+  // 删除 kv 表中的指定 key，并触发变更事件。
   delete(key: string): void {
     const oldValue = this.get(key)
     this.db.run('DELETE FROM kv WHERE key = ?', [key])
@@ -363,16 +375,17 @@ export class SqliteStore {
     this.emitter.emit('change', { key, newValue: undefined, oldValue } as ChangePayload)
   }
 
-  // Expose database for cowork operations
+  // 对外暴露底层数据库实例（供协作模块直接操作）。
   getDatabase(): Database {
     return this.db
   }
 
-  // Expose save method for external use (e.g., CoworkStore)
+  // 对外暴露保存函数（例如供 CoworkStore 复用）。
   getSaveFunction(): () => void {
     return () => this.save()
   }
 
+  // 读取历史 MEMORY.md/memory.md 内容（按候选路径顺序尝试）。
   private tryReadLegacyMemoryText(): string {
     const candidates = [
       path.join(process.cwd(), 'MEMORY.md'),
@@ -387,12 +400,13 @@ export class SqliteStore {
           return fs.readFileSync(candidate, 'utf8')
         }
       } catch {
-        // Skip unreadable candidates.
+        // 跳过不可读取的候选文件。
       }
     }
     return ''
   }
 
+  // 从历史记忆文本中提取条目，去重并裁剪长度。
   private parseLegacyMemoryEntries(raw: string): string[] {
     const normalized = raw.replace(/```[\s\S]*?```/g, ' ')
     const lines = normalized.split(/\r?\n/)
@@ -414,6 +428,7 @@ export class SqliteStore {
     return entries.slice(0, 200)
   }
 
+  // 生成记忆指纹（用于去重匹配）。
   private memoryFingerprint(text: string): string {
     const normalized = text
       .toLowerCase()
@@ -423,6 +438,7 @@ export class SqliteStore {
     return crypto.createHash('sha1').update(normalized).digest('hex')
   }
 
+  // 将历史 MEMORY.md 条目迁移到 user_memories/user_memory_sources 表。
   private migrateLegacyMemoryFileToUserMemories(): void {
     if (this.get<string>(USER_MEMORIES_MIGRATION_KEY) === '1') {
       return
@@ -443,6 +459,7 @@ export class SqliteStore {
     const now = Date.now()
     this.db.run('BEGIN TRANSACTION;')
     try {
+      // 已存在相同指纹的未删除记忆则跳过。
       for (const text of entries) {
         const fingerprint = this.memoryFingerprint(text)
         const existing = this.db.exec(`SELECT id FROM user_memories WHERE fingerprint = ? AND status != 'deleted' LIMIT 1`, [fingerprint])
@@ -451,6 +468,7 @@ export class SqliteStore {
         }
 
         const memoryId = crypto.randomUUID()
+        // 插入主记忆记录。
         this.db.run(
           `
           INSERT INTO user_memories (
@@ -460,6 +478,7 @@ export class SqliteStore {
           [memoryId, text, fingerprint, 0.9, now, now]
         )
 
+        // 插入来源记录，标记为系统来源。
         this.db.run(
           `
           INSERT INTO user_memory_sources (id, memory_id, session_id, message_id, role, is_active, created_at)
@@ -475,9 +494,11 @@ export class SqliteStore {
       console.warn('Failed to migrate legacy MEMORY.md entries:', error)
     }
 
+    // 无论是否迁移到新数据，都写入完成标记避免重复处理。
     this.set(USER_MEMORIES_MIGRATION_KEY, '1')
   }
 
+  // 当 kv 为空时，从历史 electron-store(config.json) 迁移配置数据。
   private migrateFromElectronStore(userDataPath: string) {
     const result = this.db.exec('SELECT COUNT(*) as count FROM kv')
     const count = result[0]?.values[0]?.[0] as number
