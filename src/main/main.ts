@@ -18,6 +18,7 @@ import { saveCoworkApiConfig } from './libs/coworkConfigStore'
 import { CoworkRunner } from './libs/coworkRunner'
 import { IMGatewayManager } from './im/imGatewayManager'
 import { IMGatewayConfig, IMPlatform } from './im/types'
+import { cancelActiveDownload, downloadUpdate, installUpdate } from './libs/appUpdateInstaller'
 
 // 设置应用程序名称
 app.name = APP_NAME
@@ -1836,6 +1837,34 @@ if (!gotTheLock) {
       }
     }
   )
+
+  /* ------------------- App update download & install IPC 处理 ------------------- */
+  ipcMain.handle('appUpdate:download', async (event, url: string) => {
+    try {
+      const filePath = await downloadUpdate(url, (progress) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('appUpdate:downloadProgress', progress)
+        }
+      })
+      return { success: true, filePath }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Download failed' }
+    }
+  })
+
+  ipcMain.handle('appUpdate:cancelDownload', async () => {
+    const cancelled = cancelActiveDownload()
+    return { success: cancelled }
+  })
+
+  ipcMain.handle('appUpdate:install', async (_event, filePath: string) => {
+    try {
+      await installUpdate(filePath)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Installation failed' }
+    }
+  })
 
   // 根据用户输入生成会话标题。
   ipcMain.handle('generate-session-title', async (_event, userInput: string | null) => {

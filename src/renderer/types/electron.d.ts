@@ -27,6 +27,14 @@ interface IElectronAPI {
     remove: (key: string) => Promise<void>
   }
 
+  /** 应用更新 */
+  appUpdate: {
+    download: (url: string) => Promise<{ success: boolean; filePath?: string; error?: string }>
+    cancelDownload: () => Promise<{ success: boolean }>
+    install: (filePath: string) => Promise<{ success: boolean; error?: string }>
+    onDownloadProgress: (callback: (data: AppUpdateDownloadProgress) => void) => () => void
+  }
+
   /** MCP 服务管理 API */
   mcp: {
     list: () => Promise<{ success: boolean; servers?: McpServerConfigIPC[]; error?: string }>

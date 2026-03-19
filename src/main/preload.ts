@@ -9,6 +9,16 @@ contextBridge.exposeInMainWorld('electron', {
     set: (key: string, value: any) => ipcRenderer.invoke('store:set', key, value),
     remove: (key: string) => ipcRenderer.invoke('store:remove', key)
   },
+  appUpdate: {
+    download: (url: string) => ipcRenderer.invoke('appUpdate:download', url),
+    cancelDownload: () => ipcRenderer.invoke('appUpdate:cancelDownload'),
+    install: (filePath: string) => ipcRenderer.invoke('appUpdate:install', filePath),
+    onDownloadProgress: (callback: (data: any) => void) => {
+      const handler = (_event: any, data: any) => callback(data)
+      ipcRenderer.on('appUpdate:downloadProgress', handler)
+      return () => ipcRenderer.removeListener('appUpdate:downloadProgress', handler)
+    }
+  },
   mcp: {
     list: () => ipcRenderer.invoke('mcp:list'),
     create: (data: any) => ipcRenderer.invoke('mcp:create', data),

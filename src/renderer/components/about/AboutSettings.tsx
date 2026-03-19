@@ -1,3 +1,4 @@
+import { AppUpdateInfo, checkForAppUpdate } from '@/services/appUpdate'
 import { configService } from '@/services/config'
 import { i18nService, LanguageType } from '@/services/i18n'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -6,21 +7,36 @@ interface AboutSettingsProps {
   language: LanguageType
   setError: (message: string | null) => void
   setNoticeMessage: (message: string | null) => void
+  onUpdateFound?: (info: AppUpdateInfo) => void
 }
 
-const AboutSettings: React.FC<AboutSettingsProps> = ({ language, setError, setNoticeMessage }) => {
+const AboutSettings: React.FC<AboutSettingsProps> = ({ language, setError, setNoticeMessage, onUpdateFound }) => {
   const [appVersion, setAppVersion] = useState('')
   const [emailCopied, setEmailCopied] = useState(false)
   const [isExportingLogs, setIsExportingLogs] = useState(false)
   const [testMode, setTestMode] = useState(false)
   const [logoClickCount, setLogoClickCount] = useState(0)
   const [testModeUnlocked, setTestModeUnlocked] = useState(false)
+  const [updateCheckStatus, setUpdateCheckStatus] = useState<'idle' | 'checking' | 'upToDate' | 'error'>('idle')
 
   const emailCopiedTimerRef = useRef<number | null>(null)
+  const updateCheckTimerRef = useRef<number | null>(null)
 
   const ABOUT_CONTACT_EMAIL = 'lobsterai.project@rd.netease.com'
   const ABOUT_USER_MANUAL_URL = 'https://lobsterai.youdao.com/#/docs/lobsterai_user_manual'
   const ABOUT_SERVICE_TERMS_URL = 'https://c.youdao.com/dict/hardware/lobsterai/lobsterai_service.html'
+
+  useEffect(
+    () => () => {
+      if (emailCopiedTimerRef.current != null) {
+        window.clearTimeout(emailCopiedTimerRef.current)
+      }
+      if (updateCheckTimerRef.current != null) {
+        window.clearTimeout(updateCheckTimerRef.current)
+      }
+    },
+    []
+  )
 
   useEffect(() => {
     window.electron.appInfo.getVersion().then(setAppVersion)
@@ -33,6 +49,36 @@ const AboutSettings: React.FC<AboutSettingsProps> = ({ language, setError, setNo
     setTestMode(savedTestMode)
     if (savedTestMode) setTestModeUnlocked(true)
   }, [])
+
+  const handleCheckUpdate = useCallback(async () => {
+    if (updateCheckStatus === 'checking' || !appVersion) return
+    setUpdateCheckStatus('checking')
+    try {
+      const info = await checkForAppUpdate(appVersion)
+      if (info) {
+        setUpdateCheckStatus('idle')
+        onUpdateFound?.(info)
+      } else {
+        setUpdateCheckStatus('upToDate')
+        if (updateCheckTimerRef.current != null) {
+          window.clearTimeout(updateCheckTimerRef.current)
+        }
+        updateCheckTimerRef.current = window.setTimeout(() => {
+          setUpdateCheckStatus('idle')
+          updateCheckTimerRef.current = null
+        }, 3000)
+      }
+    } catch {
+      setUpdateCheckStatus('error')
+      if (updateCheckTimerRef.current != null) {
+        window.clearTimeout(updateCheckTimerRef.current)
+      }
+      updateCheckTimerRef.current = window.setTimeout(() => {
+        setUpdateCheckStatus('idle')
+        updateCheckTimerRef.current = null
+      }, 3000)
+    }
+  }, [appVersion, updateCheckStatus, onUpdateFound])
 
   const handleCopyContactEmail = useCallback(async () => {
     const copied = await copyTextToClipboard(ABOUT_CONTACT_EMAIL)
@@ -147,7 +193,23 @@ const AboutSettings: React.FC<AboutSettingsProps> = ({ language, setError, setNo
       <div className="w-full mt-8 rounded-xl border border-claude-border dark:border-claude-darkBorder overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-claude-border dark:border-claude-darkBorder">
           <span className="text-sm dark:text-claude-darkText text-claude-text">{i18nService.t('aboutVersion')}</span>
-          <span className="text-sm dark:text-claude-darkTextSecondary text-claude-textSecondary">{appVersion}</span>
+          <div className="flex items-center gap-2">
+            <span className="text-sm dark:text-claude-darkTextSecondary text-claude-textSecondary">{appVersion}</span>
+            <button
+              type="button"
+              disabled={updateCheckStatus === 'checking'}
+              onClick={(e) => {
+                e.stopPropagation()
+                void handleCheckUpdate()
+              }}
+              className="text-xs px-2 py-0.5 rounded-md border border-claude-border dark:border-claude-darkBorder dark:text-claude-darkTextSecondary text-claude-textSecondary hover:text-claude-accent dark:hover:text-claude-accent hover:border-claude-accent dark:hover:border-claude-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {updateCheckStatus === 'checking' && i18nService.t('updateChecking')}
+              {updateCheckStatus === 'upToDate' && i18nService.t('updateUpToDate')}
+              {updateCheckStatus === 'error' && i18nService.t('updateCheckFailed')}
+              {updateCheckStatus === 'idle' && i18nService.t('checkForUpdate')}
+            </button>
+          </div>
         </div>
         <div className="flex items-center justify-between px-4 py-3 border-b border-claude-border dark:border-claude-darkBorder">
           <span className="text-sm dark:text-claude-darkText text-claude-text">{i18nService.t('aboutContactEmail')}</span>

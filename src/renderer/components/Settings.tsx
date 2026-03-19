@@ -27,6 +27,7 @@ import AboutSettings from './about/AboutSettings'
 import ImSettings from './im/IMSettings'
 import { themeService } from '@/services/theme'
 import { configService } from '@/services/config'
+import { AppUpdateInfo } from '@/services/appUpdate'
 
 export type TabType = 'general' | 'model' | 'coworkSandbox' | 'coworkMemory' | 'shortcuts' | 'im' | 'email' | 'about'
 
@@ -37,9 +38,10 @@ export type SettingsOpenOptions = {
 
 interface SettingsProps extends SettingsOpenOptions {
   onClose: () => void
+  onUpdateFound?: (info: AppUpdateInfo) => void
 }
 
-const Settings: React.FC<SettingsProps> = ({ initialTab, notice, onClose }) => {
+const Settings: React.FC<SettingsProps> = ({ initialTab, notice, onClose, onUpdateFound }) => {
   const [activeTab, setActiveTab] = useState<TabType>(initialTab ?? 'general')
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -244,7 +246,7 @@ const Settings: React.FC<SettingsProps> = ({ initialTab, notice, onClose }) => {
               </div>
 
               <div className={activeTab === 'about' ? 'block h-full' : 'hidden'}>
-                <AboutSettings language={language} setError={setError} setNoticeMessage={setNoticeMessage} />
+                <AboutSettings language={language} setError={setError} setNoticeMessage={setNoticeMessage} onUpdateFound={onUpdateFound} />
               </div>
             </div>
 
