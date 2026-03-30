@@ -10,6 +10,7 @@ import { parseChannelSessionKey } from './openclawChannelSessionSync';
 import type { McpToolManifestEntry } from './mcpServerManager';
 import { hasBundledOpenClawExtension } from './openclawLocalExtensions';
 import { buildScheduledTaskEnginePrompt } from '../../scheduled-task/enginePrompt';
+import { getOpenClawTokenProxyPort } from './openclawTokenProxy';
 
 export type McpBridgeConfig = {
   callbackUrl: string;
@@ -351,12 +352,16 @@ const buildProviderSelection = (options: {
   const providerName = options.providerName ?? '';
   const codingPlanEnabled = !!options.codingPlanEnabled;
 
-  // lobsterai-server: route through the LobsterAI server proxy
+  // lobsterai-server: route through the token proxy
   if (providerName === 'lobsterai-server') {
-    const strippedBaseUrl = stripChatCompletionsSuffix(options.baseURL);
+    const proxyPort = getOpenClawTokenProxyPort();
+    const proxyBaseUrl = proxyPort
+      ? `http://127.0.0.1:${proxyPort}/v1`
+      : stripChatCompletionsSuffix(options.baseURL);
     console.log('[OpenClawConfigSync] buildProviderSelection lobsterai-server:', {
       inputBaseURL: options.baseURL,
-      strippedBaseUrl,
+      proxyBaseUrl,
+      proxyPort,
       modelId: options.modelId,
       primaryModel: `lobsterai-server/${options.modelId}`,
       api: 'openai-completions',
@@ -367,9 +372,9 @@ const buildProviderSelection = (options: {
       sessionModelId: options.modelId,
       primaryModel: `lobsterai-server/${options.modelId}`,
       providerConfig: {
-        baseUrl: strippedBaseUrl,
+        baseUrl: proxyBaseUrl,
         api: 'openai-completions',
-        apiKey: `\${${providerApiKeyEnvVar('server')}}`,
+        apiKey: proxyPort ? 'proxy-managed' : `\${${providerApiKeyEnvVar('server')}}`,
         auth: 'api-key',
         models: [{
           id: options.modelId,

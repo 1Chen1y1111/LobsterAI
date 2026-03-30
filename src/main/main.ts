@@ -19,6 +19,7 @@ import { getCurrentApiConfig, resolveCurrentApiConfig, setStoreGetter, setAuthTo
 import { saveCoworkApiConfig } from './libs/coworkConfigStore';
 import { generateSessionTitle, probeCoworkModelReadiness } from './libs/coworkUtil';
 import { startCoworkOpenAICompatProxy, stopCoworkOpenAICompatProxy, setProxyTokenRefresher } from './libs/coworkOpenAICompatProxy';
+import { startOpenClawTokenProxy, stopOpenClawTokenProxy } from './libs/openclawTokenProxy';
 import { OpenClawEngineManager, type OpenClawEngineStatus } from './libs/openclawEngineManager';
 import {
   listPairingRequests,
@@ -710,21 +711,11 @@ const ensureOpenClawRunningForCowork = async () => {
   const manager = getOpenClawEngineManager();
   const status = manager.getStatus();
   if (status.phase === 'running') {
-    // If the gateway is already running but a token refresh is in flight,
-    // wait for it and then re-sync secret env vars so the gateway gets
-    // the fresh token on its next restart (or immediately if we detect a change).
+    // Token proxy handles dynamic token injection — no need to restart
+    // the gateway for token changes. Just wait for any in-flight refresh.
     if (pendingTokenRefresh) {
       console.log('[OpenClaw] ensureRunning: awaiting pending token refresh before proceeding');
       await pendingTokenRefresh.catch(() => {});
-      // After refresh, update gateway secret env vars in case the token changed.
-      const nextEnv = getOpenClawConfigSync().collectSecretEnvVars();
-      const prevEnv = getOpenClawEngineManager().getSecretEnvVars();
-      if (JSON.stringify(nextEnv) !== JSON.stringify(prevEnv)) {
-        console.log('[OpenClaw] ensureRunning: token changed during pending refresh, syncing config');
-        getOpenClawEngineManager().setSecretEnvVars(nextEnv);
-        // Gateway env vars are fixed at spawn; must restart to pick up new token.
-        await syncOpenClawConfig({ reason: 'token-refresh:ensureRunning', restartGatewayIfRunning: true });
-      }
     }
     return manager.getStatus();
   }
@@ -4484,6 +4475,8 @@ if (!gotTheLock) {
       console.error('Failed to stop OpenAI compatibility proxy:', error);
     });
 
+    stopOpenClawTokenProxy();
+
     // Stop skill services.
     const skillServices = getSkillServiceManager();
     await skillServices.stopAll();
@@ -4617,9 +4610,9 @@ if (!gotTheLock) {
               saveAuthTokens(body.data.accessToken, body.data.refreshToken || tokens.refreshToken);
               console.log(`[Auth] token refresh succeeded (reason: ${reason})`);
               resolvedToken = body.data.accessToken;
-              // Sync the fresh token to the OpenClaw gateway so it doesn't
-              // continue using the expired token from its spawn-time env vars.
-              syncOpenClawConfig({ reason: `token-refresh:${reason}`, restartGatewayIfRunning: true }).catch((err) => {
+              // Token proxy handles fresh tokens dynamically — no need
+              // to restart the gateway on token refresh.
+              syncOpenClawConfig({ reason: `token-refresh:${reason}`, restartGatewayIfRunning: false }).catch((err) => {
                 console.warn('[Auth] post-refresh OpenClaw config sync failed:', err);
               });
             }
@@ -4653,6 +4646,19 @@ if (!gotTheLock) {
     // on 401/403 with a fresh accessToken instead of failing immediately.
     // Delegates to the shared refreshOnce() to avoid concurrent refresh races.
     setProxyTokenRefresher(() => refreshOnce('proxy'));
+
+    // Start the lightweight token proxy before OpenClaw config sync so that
+    // lobsterai-server provider can use the proxy URL in its config.
+    try {
+      await startOpenClawTokenProxy({
+        getAuthTokens,
+        refreshToken: refreshOnce,
+        getServerBaseUrl: getServerApiBaseUrl,
+      });
+      console.log('[Main] OpenClaw token proxy started');
+    } catch (err) {
+      console.warn('[Main] OpenClaw token proxy failed to start (non-fatal):', err);
+    }
 
     bindCoworkRuntimeForwarder();
     bindOpenClawStatusForwarder();
