@@ -1,36 +1,37 @@
-import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { createPortal } from 'react-dom';
-import { useSelector, useDispatch } from 'react-redux';
-import { RootState } from '../../store';
-import { i18nService } from '../../services/i18n';
-import type { CoworkMessage, CoworkMessageMetadata, CoworkImageAttachment } from '../../types/cowork';
-import type { Skill } from '../../types/skill';
-import CoworkPromptInput, { type CoworkPromptInputRef } from './CoworkPromptInput';
-import MarkdownContent from '../MarkdownContent';
+import { ShareIcon } from '@heroicons/react/20/solid';
 import {
   CheckIcon,
   ChevronRightIcon,
-  PhotoIcon,
   DocumentArrowDownIcon,
+  PhotoIcon,
 } from '@heroicons/react/24/outline';
-import { ShareIcon } from '@heroicons/react/20/solid';
-import InformationCircleIcon from '../icons/InformationCircleIcon';
-import ExclamationTriangleIcon from '../icons/ExclamationTriangleIcon';
 import { FolderIcon } from '@heroicons/react/24/solid';
-import { coworkService } from '../../services/cowork';
-import SidebarToggleIcon from '../icons/SidebarToggleIcon';
-import ComposeIcon from '../icons/ComposeIcon';
-import LazyRenderTurn, { clearHeightCache } from './LazyRenderTurn';
-import PuzzleIcon from '../icons/PuzzleIcon';
-import EllipsisHorizontalIcon from '../icons/EllipsisHorizontalIcon';
-import PencilSquareIcon from '../icons/PencilSquareIcon';
-import TrashIcon from '../icons/TrashIcon';
-import WindowTitleBar from '../window/WindowTitleBar';
-import { getCompactFolderName } from '../../utils/path';
+import React, { useCallback, useEffect, useMemo,useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useDispatch,useSelector } from 'react-redux';
+
 import { getScheduledReminderDisplayText } from '../../../scheduledTask/reminderText';
+import { coworkService } from '../../services/cowork';
+import { i18nService } from '../../services/i18n';
+import { RootState } from '../../store';
 import { setActiveSkillIds } from '../../store/slices/skillSlice';
-import DiffView, { extractDiffFromToolInput } from './DiffView';
+import type { CoworkImageAttachment,CoworkMessage, CoworkMessageMetadata } from '../../types/cowork';
+import type { Skill } from '../../types/skill';
+import { getCompactFolderName } from '../../utils/path';
 import Modal from '../common/Modal';
+import ComposeIcon from '../icons/ComposeIcon';
+import EllipsisHorizontalIcon from '../icons/EllipsisHorizontalIcon';
+import ExclamationTriangleIcon from '../icons/ExclamationTriangleIcon';
+import InformationCircleIcon from '../icons/InformationCircleIcon';
+import PencilSquareIcon from '../icons/PencilSquareIcon';
+import PuzzleIcon from '../icons/PuzzleIcon';
+import SidebarToggleIcon from '../icons/SidebarToggleIcon';
+import TrashIcon from '../icons/TrashIcon';
+import MarkdownContent from '../MarkdownContent';
+import WindowTitleBar from '../window/WindowTitleBar';
+import CoworkPromptInput, { type CoworkPromptInputRef } from './CoworkPromptInput';
+import DiffView, { extractDiffFromToolInput } from './DiffView';
+import LazyRenderTurn, { clearHeightCache } from './LazyRenderTurn';
 
 interface CoworkSessionDetailProps {
   onManageSkills?: () => void;
@@ -2139,7 +2140,7 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
         <LazyRenderTurn key={turn.id} turnId={turn.id} alwaysRender={alwaysRender} data-turn-index={index}>
           {turn.userMessage && (
             <div data-export-role="user-message" {...(userRailIdx >= 0 ? { 'data-rail-index': userRailIdx } : undefined)}>
-              <UserMessageItem message={turn.userMessage} skills={skills} onReEdit={handleReEdit} />
+              <UserMessageItem message={turn.userMessage} skills={skills} onReEdit={remoteManaged ? undefined : handleReEdit} />
             </div>
           )}
           {showAssistantBlock && (
@@ -2599,27 +2600,19 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
       {/* Input Area */}
       <div className="p-4 shrink-0">
         <div className="max-w-3xl mx-auto">
-          {remoteManaged ? (
-            <div className="flex items-center gap-2 rounded-xl border dark:border-claude-darkBorder border-claude-border dark:bg-claude-darkSurface bg-claude-surface px-4 py-3">
-              <InformationCircleIcon className="h-5 w-5 shrink-0 dark:text-claude-darkTextSecondary text-claude-textSecondary" />
-              <span className="text-sm dark:text-claude-darkTextSecondary text-claude-textSecondary">
-                {i18nService.t('coworkRemoteManagedPlaceholder')}
-              </span>
-            </div>
-          ) : (
-            <CoworkPromptInput
-              ref={promptInputRef}
-              onSubmit={onContinue}
-              onStop={onStop}
-              isStreaming={isStreaming}
-              placeholder={i18nService.t('coworkContinuePlaceholder')}
-              disabled={false}
-              onManageSkills={onManageSkills}
-              size="large"
-              showModelSelector={true}
-              sessionId={currentSession?.id}
-            />
-          )}
+          <CoworkPromptInput
+            ref={promptInputRef}
+            onSubmit={onContinue}
+            onStop={onStop}
+            isStreaming={isStreaming}
+            placeholder={i18nService.t(remoteManaged ? 'coworkRemoteManagedPlaceholder' : 'coworkContinuePlaceholder')}
+            disabled={remoteManaged}
+            size="large"
+            remoteManaged={remoteManaged}
+            onManageSkills={remoteManaged ? undefined : onManageSkills}
+            showModelSelector={!remoteManaged}
+            sessionId={currentSession?.id}
+          />
         </div>
         <p className="text-center text-[10px] text-muted opacity-50 mt-2 mb-[-8px] select-none">
           {i18nService.t('aiGeneratedDisclaimer')}
