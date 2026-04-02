@@ -468,6 +468,65 @@ const ShortcutRecorder: React.FC<{ value: string; onChange: (v: string) => void 
   );
 };
 
+const SendShortcutSelect: React.FC<{ value: string; onChange: (v: string) => void }> = ({ value, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [open]);
+
+  const currentLabel = (() => {
+    const opt = SEND_SHORTCUT_OPTIONS.find(o => o.value === value);
+    if (!opt) return value;
+    return isMacPlatform ? opt.labelMac : opt.label;
+  })();
+
+  return (
+    <div ref={containerRef} className="relative">
+      <div
+        onClick={() => setOpen(!open)}
+        className={`w-36 rounded-xl border px-3 py-1.5 text-sm cursor-pointer select-none text-center outline-none transition-colors
+          dark:bg-claude-darkSurfaceInset bg-claude-surfaceInset dark:text-claude-darkText text-claude-text
+          ${open
+            ? 'border-claude-accent ring-1 ring-claude-accent/30'
+            : 'dark:border-claude-darkBorder border-claude-border hover:border-claude-accent/50'
+          }`}
+      >
+        {currentLabel}
+      </div>
+      {open && (
+        <div className="absolute right-0 mt-1 z-50 min-w-[160px] rounded-xl border dark:border-claude-darkBorder border-claude-border dark:bg-claude-darkSurfaceInset bg-claude-surfaceInset shadow-elevated py-1">
+          {SEND_SHORTCUT_OPTIONS.map((option) => {
+            const label = isMacPlatform ? option.labelMac : option.label;
+            const isActive = value === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => { onChange(option.value); setOpen(false); }}
+                className={`flex items-center justify-between w-full px-3 py-1.5 text-sm transition-colors
+                  ${isActive
+                    ? 'dark:text-claude-accent text-claude-accent font-medium'
+                    : 'dark:text-claude-darkText text-claude-text'
+                  } hover:bg-claude-accent/10`}
+              >
+                <span>{label}</span>
+                {isActive && <span className="text-claude-accent">✓</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpdateFound, enterpriseConfig }) => {
   const dispatch = useDispatch();
   // 状态
@@ -3457,20 +3516,10 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-foreground">{i18nService.t('sendMessageShortcut')}</span>
-                  <select
+                  <SendShortcutSelect
                     value={shortcuts.sendMessage}
-                    onChange={(e) => handleShortcutChange('sendMessage', e.target.value)}
-                    className="w-36 rounded-xl border px-3 py-1.5 text-sm cursor-pointer select-none text-center outline-none transition-colors
-                      dark:bg-claude-darkSurfaceInset bg-claude-surfaceInset dark:text-claude-darkText text-claude-text
-                      dark:border-claude-darkBorder border-claude-border hover:border-claude-accent/50
-                      focus:border-claude-accent focus:ring-1 focus:ring-claude-accent/30"
-                  >
-                    {SEND_SHORTCUT_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {isMacPlatform ? option.labelMac : option.label}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(v) => handleShortcutChange('sendMessage', v)}
+                  />
                 </div>
               </div>
             </div>
