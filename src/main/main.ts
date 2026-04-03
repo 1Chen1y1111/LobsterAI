@@ -15,7 +15,7 @@ import {
 } from './libs/agentEngine';
 import { SkillManager } from './skillManager';
 import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk';
-import { getCurrentApiConfig, resolveCurrentApiConfig, setStoreGetter, setAuthTokensGetter, setServerBaseUrlGetter, updateServerModelMetadata, clearServerModelMetadata } from './libs/claudeSettings';
+import { getCurrentApiConfig, resolveCurrentApiConfig, resolveRawApiConfig, resolveAllEnabledProviderConfigs, setStoreGetter, setAuthTokensGetter, setServerBaseUrlGetter, updateServerModelMetadata, clearServerModelMetadata } from './libs/claudeSettings';
 import { saveCoworkApiConfig } from './libs/coworkConfigStore';
 import { generateSessionTitle, probeCoworkModelReadiness } from './libs/coworkUtil';
 import { startCoworkOpenAICompatProxy, stopCoworkOpenAICompatProxy, registerProxyTokenRefresher } from './libs/coworkOpenAICompatProxy';
@@ -27,7 +27,7 @@ import {
   rejectPairingRequest,
   readAllowFromStore,
 } from './im/imPairingStore';
-import { OpenClawConfigSync } from './libs/openclawConfigSync';
+import { OpenClawConfigSync, buildProviderSelection } from './libs/openclawConfigSync';
 import {
   initCopilotTokenManager,
   setCopilotTokenState,
@@ -47,6 +47,7 @@ import {
   writeBootstrapFile,
   ensureDefaultIdentity,
 } from './libs/openclawMemoryFile';
+import { resolveQualifiedAgentModelRef } from './libs/openclawAgentModels';
 import {
   OpenClawChannelSessionSync,
   buildManagedSessionKey,
@@ -118,6 +119,88 @@ const MIME_EXTENSION_MAP: Record<string, string> = {
 const sanitizeExportFileName = (value: string): string => {
   const sanitized = value.replace(INVALID_FILE_NAME_PATTERN, ' ').replace(/\s+/g, ' ').trim();
   return sanitized || 'cowork-session';
+};
+
+const resolveDefaultAgentModelRef = (): string => {
+  const apiResolution = resolveRawApiConfig();
+  const config = apiResolution.config;
+  if (!config?.model?.trim()) {
+    return '';
+  }
+
+  return buildProviderSelection({
+    apiKey: config.apiKey,
+    baseURL: config.baseURL,
+    modelId: config.model.trim(),
+    apiType: config.apiType,
+    providerName: apiResolution.providerMetadata?.providerName,
+    codingPlanEnabled: apiResolution.providerMetadata?.codingPlanEnabled,
+    supportsImage: apiResolution.providerMetadata?.supportsImage,
+    modelName: apiResolution.providerMetadata?.modelName,
+  }).primaryModel;
+};
+
+const buildAvailableOpenClawProviders = (): Record<string, { models: Array<{ id: string }> }> => {
+  const providerMap: Record<string, { models: Array<{ id: string }> }> = {};
+
+  for (const provider of resolveAllEnabledProviderConfigs()) {
+    for (const model of provider.models) {
+      const selection = buildProviderSelection({
+        apiKey: provider.apiKey,
+        baseURL: provider.baseURL,
+        modelId: model.id,
+        apiType: provider.apiType,
+        providerName: provider.providerName,
+        codingPlanEnabled: provider.codingPlanEnabled,
+        supportsImage: model.supportsImage,
+        modelName: model.name,
+      });
+
+      if (!providerMap[selection.providerId]) {
+        providerMap[selection.providerId] = { models: [] };
+      }
+      if (!providerMap[selection.providerId].models.some((entry) => entry.id === selection.sessionModelId)) {
+        providerMap[selection.providerId].models.push({ id: selection.sessionModelId });
+      }
+    }
+  }
+
+  return providerMap;
+};
+
+const migrateAgentModelRefs = (): number => {
+  const defaultModelRef = resolveDefaultAgentModelRef();
+  if (!defaultModelRef) return 0;
+
+  const availableProviders = buildAvailableOpenClawProviders();
+  const agents = getAgentManager().listAgents();
+  let changed = 0;
+
+  for (const agent of agents) {
+    const normalizedModel = agent.model.trim();
+    if (!normalizedModel) continue;
+
+    const qualification = resolveQualifiedAgentModelRef({
+      agentModel: normalizedModel,
+      availableProviders,
+    });
+
+    if (qualification.status === 'ambiguous') {
+      console.warn(
+        `[Main] Skipped ambiguous agent model migration for "${agent.id}" because "${qualification.modelId}" matches multiple providers: ${qualification.providerIds.join(', ')}`,
+      );
+      continue;
+    }
+
+    if (qualification.status !== 'qualified' || qualification.primaryModel === normalizedModel) {
+      continue;
+    }
+
+    getCoworkStore().updateAgent(agent.id, { model: qualification.primaryModel });
+    changed += 1;
+  }
+
+  return changed;
 };
 
 const sanitizeAttachmentFileName = (value?: string): string => {
@@ -2750,7 +2833,7 @@ if (!gotTheLock) {
 
   ipcMain.handle('agents:create', async (_event, request: import('./coworkStore').CreateAgentRequest) => {
     try {
-      const agent = getAgentManager().createAgent(request);
+      const agent = getAgentManager().createAgent(request, resolveDefaultAgentModelRef());
       // Sync config so workspace files (SOUL.md, IDENTITY.md) are written
       // before OpenClaw scaffolds default templates for the new agent.
       syncOpenClawConfig({ reason: 'agent-created' }).catch(() => {});
@@ -2816,7 +2899,7 @@ if (!gotTheLock) {
 
   ipcMain.handle('agents:addPreset', async (_event, presetId: string) => {
     try {
-      const agent = getAgentManager().addPresetAgent(presetId);
+      const agent = getAgentManager().addPresetAgent(presetId, resolveDefaultAgentModelRef());
       syncOpenClawConfig({ reason: 'agent-preset-added' }).catch(() => {});
       return { success: true, agent };
     } catch (error) {
@@ -4872,6 +4955,15 @@ if (!gotTheLock) {
 
     bindCoworkRuntimeForwarder();
     bindOpenClawStatusForwarder();
+
+    const defaultAgentModelRef = resolveDefaultAgentModelRef();
+    const backfilledAgentModels = getCoworkStore().backfillEmptyAgentModels(defaultAgentModelRef);
+    const qualifiedAgentModels = migrateAgentModelRefs();
+    if (backfilledAgentModels > 0 || qualifiedAgentModels > 0) {
+      console.log(
+        `[Main] migrated agent model bindings: backfilled=${backfilledAgentModels}, qualified=${qualifiedAgentModels}`,
+      );
+    }
 
     const startupSync = await syncOpenClawConfig({
       reason: 'startup',

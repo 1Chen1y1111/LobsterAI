@@ -8,6 +8,7 @@ import { imService } from '../../services/im';
 import type { RootState } from '../../store';
 import type { Model } from '../../store/slices/modelSlice';
 import type { IMGatewayConfig,IMPlatform } from '../../types/im';
+import { toOpenClawModelRef } from '../../utils/openclawModelRef';
 import { getVisibleIMPlatforms } from '../../utils/regionFilter';
 import Modal from '../common/Modal';
 import ModelSelector from '../ModelSelector';
@@ -45,6 +46,7 @@ const AgentCreateModal: React.FC<AgentCreateModalProps> = ({ isOpen, onClose }) 
   const [creating, setCreating] = useState(false);
   const [activeTab, setActiveTab] = useState<CreateTab>('basic');
   const availableModels = useSelector((state: RootState) => state.model.availableModels);
+  const globalSelectedModel = useSelector((state: RootState) => state.model.selectedModel);
 
   // IM binding state
   const [imConfig, setImConfig] = useState<IMGatewayConfig | null>(null);
@@ -56,6 +58,11 @@ const AgentCreateModal: React.FC<AgentCreateModalProps> = ({ isOpen, onClose }) 
       if (cfg) setImConfig(cfg);
     });
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || model || !globalSelectedModel) return;
+    setModel(globalSelectedModel);
+  }, [globalSelectedModel, isOpen, model]);
 
   if (!isOpen) return null;
 
@@ -80,7 +87,7 @@ const AgentCreateModal: React.FC<AgentCreateModalProps> = ({ isOpen, onClose }) 
         description: description.trim(),
         systemPrompt: systemPrompt.trim(),
         identity: identity.trim(),
-        model: model?.id ?? '',
+        model: model ? toOpenClawModelRef(model) : '',
         icon: icon.trim() || undefined,
         skillIds,
       });
@@ -225,7 +232,6 @@ const AgentCreateModal: React.FC<AgentCreateModalProps> = ({ isOpen, onClose }) 
                 <ModelSelector
                   value={model}
                   onChange={setModel}
-                  defaultLabel={i18nService.t('agentModelUseGlobalDefault') || 'Use global default model'}
                 />
                 {availableModels.length > 0 && (
                   <p className="mt-1 text-xs text-secondary/70">

@@ -8,6 +8,7 @@ import { coworkService } from '../../services/cowork';
 import { skillService } from '../../services/skill';
 import { quickActionService } from '../../services/quickAction';
 import { i18nService } from '../../services/i18n';
+import { agentService } from '../../services/agent';
 import CoworkPromptInput, { type CoworkPromptInputRef } from './CoworkPromptInput';
 import CoworkSessionDetail from './CoworkSessionDetail';
 import ModelSelector from '../ModelSelector';
@@ -18,6 +19,8 @@ import WindowTitleBar from '../window/WindowTitleBar';
 import { QuickActionBar, PromptPanel } from '../quick-actions';
 import type { SettingsOpenOptions } from '../Settings';
 import type { CoworkSession, CoworkImageAttachment, OpenClawEngineStatus } from '../../types/cowork';
+import { toOpenClawModelRef } from '../../utils/openclawModelRef';
+import { resolveAgentModelSelection } from './agentModelSelection';
 
 export interface CoworkViewProps {
   onRequestAppSettings?: (options?: SettingsOpenOptions) => void;
@@ -59,6 +62,18 @@ const CoworkView: React.FC<CoworkViewProps> = ({ onRequestAppSettings, onShowSki
   const quickActions = useSelector((state: RootState) => state.quickAction.actions);
   const selectedActionId = useSelector((state: RootState) => state.quickAction.selectedActionId);
   const currentAgentId = useSelector((state: RootState) => state.agent.currentAgentId);
+  const agents = useSelector((state: RootState) => state.agent.agents);
+  const availableModels = useSelector((state: RootState) => state.model.availableModels);
+  const globalSelectedModel = useSelector((state: RootState) => state.model.selectedModel);
+  const currentAgent = agents.find((agent) => agent.id === currentAgentId);
+  const {
+    selectedModel: headerSelectedModel,
+  } = resolveAgentModelSelection({
+    agentModel: currentAgent?.model ?? '',
+    availableModels,
+    fallbackModel: globalSelectedModel,
+    engine: config.agentEngine,
+  });
 
   const buildApiConfigNotice = (error?: string): { noticeI18nKey: string; noticeExtra?: string } => {
     const key = 'coworkModelSettingsRequired';
@@ -482,7 +497,15 @@ const CoworkView: React.FC<CoworkViewProps> = ({ onRequestAppSettings, onShowSki
             {updateBadge}
           </div>
         )}
-        <ModelSelector />
+        <ModelSelector
+          value={isOpenClawEngine ? headerSelectedModel : undefined}
+          onChange={isOpenClawEngine
+            ? async (nextModel) => {
+                if (!currentAgent || !nextModel) return;
+                await agentService.updateAgent(currentAgent.id, { model: toOpenClawModelRef(nextModel) });
+              }
+            : undefined}
+        />
       </div>
       <div className="non-draggable flex items-center">
         <div className="flex items-center gap-1.5 mr-2 px-2.5 py-1">

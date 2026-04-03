@@ -1796,6 +1796,23 @@ export class CoworkStore {
     return this.getAgent(id)!;
   }
 
+  backfillEmptyAgentModels(modelId: string): number {
+    const normalizedModelId = modelId.trim();
+    if (!normalizedModelId) return 0;
+
+    this.db.run(
+      'UPDATE agents SET model = ?, updated_at = ? WHERE TRIM(COALESCE(model, \'\')) = \'\'',
+      [normalizedModelId, Date.now()],
+    );
+
+    const changed = this.db.getRowsModified();
+    if (changed > 0) {
+      this.saveDb();
+    }
+
+    return changed;
+  }
+
   updateAgent(id: string, updates: UpdateAgentRequest): Agent | null {
     const existing = this.getAgent(id);
     if (!existing) return null;
@@ -1840,7 +1857,6 @@ export class CoworkStore {
     values.push(id);
     this.db.run(`UPDATE agents SET ${setClauses.join(', ')} WHERE id = ?`, values);
     this.saveDb();
-
     return this.getAgent(id);
   }
 

@@ -29,7 +29,7 @@ The codebase already stores `agents.model`, but the product behavior is still ef
 1. Each Agent has a single default model persisted in `agents.model`.
 2. In `openclaw`, the top-left model selector reflects and edits the current Agent's model.
 3. Model changes apply to all sessions under that Agent, including old sessions when they continue.
-4. The UX makes it explicit that this is an Agent-level change, not a session-level override.
+4. The UX treats model selection as direct Agent configuration, not a session-level override.
 
 ## Non-Goals
 
@@ -45,7 +45,7 @@ The codebase already stores `agents.model`, but the product behavior is still ef
 
 1. The only model ownership level introduced by this feature is `agent`.
 2. When the user is on an Agent tab, the Cowork top-left model selector shows that Agent's model.
-3. If the Agent has no configured model, the UI falls back to the global default model.
+3. Existing Agents without `model` are migrated to explicit Agent models at startup using the current global default only when the provider resolution is unambiguous.
 4. Changing the model in the top-left selector updates the current Agent's default model.
 5. The change affects all sessions under that Agent.
 6. There is no concept of a temporary per-session model override.
@@ -103,17 +103,13 @@ In non-OpenClaw mode:
 
 ### Confirmation and Explanatory Copy
 
-Use the confirmed "option 3" behavior:
+No confirmation prompt is shown when the user changes the current Agent model from Cowork.
 
-1. When the user changes the model from the top-left selector, show a clear confirmation or first-time warning.
-2. The message must explain:
-   - this changes the current Agent's default model
-   - this affects all sessions under the current Agent
-   - this only applies to the OpenClaw engine
+Requirements:
 
-Recommended core copy:
-
-`This changes the current Agent's default model and affects all sessions under this Agent. This behavior only applies to the OpenClaw engine.`
+1. The top-left selector and the input-area selector both update the current Agent immediately.
+2. The UI copy around Agent settings should continue to label the field as `Agent Default Model`.
+3. The product does not introduce a separate warning gate for Agent-level model changes.
 
 ### Agent Management Screens
 
@@ -154,10 +150,10 @@ This keeps the model behavior consistent for both new and existing sessions.
 
 ### Missing Agent Model
 
-If `agent.model` is empty:
+If `agent.model` is empty on historical data:
 
-1. use the global default model
-2. display fallback state in UI clearly enough that users do not mistake it for an explicit Agent binding
+1. try to migrate it to an explicit Agent model during startup
+2. use the global default model only as the migration source for empty values, not as a persistent UI fallback mode
 
 ### Invalid Agent Model
 
@@ -189,26 +185,26 @@ The intended implementation surface explicitly excludes:
 
 1. `yd_cowork` runtime changes
 2. session schema changes
-3. session migration logic
+3. session-level model overrides
 4. multi-level override precedence beyond `agent.model -> global default`
 
 ## Acceptance Criteria
 
 1. In OpenClaw mode, switching to different Agents updates the top-left model selector to each Agent's model.
 2. In OpenClaw mode, changing the top-left selector updates the current Agent's persisted `model`.
-3. The user sees a warning that the change affects all sessions under the current Agent.
+3. Changing the top-left selector does not require a confirmation prompt.
 4. Creating a new session under an Agent uses that Agent's model.
 5. Continuing an old session under an Agent also uses that Agent's current model.
-6. If an Agent has no model configured, the system falls back to the global default model.
-7. If an Agent's configured model is invalid, OpenClaw execution is blocked with a clear corrective message.
-8. In `yd_cowork`, current model behavior remains unchanged.
-9. Agent create and edit flows both expose `Agent Default Model` with text indicating it is OpenClaw-only.
+6. Historical empty Agent models are migrated to explicit values during startup.
+7. Bare historical model ids are auto-qualified only when the provider match is unique; ambiguous matches are left unchanged and warned.
+8. If an Agent's configured model is invalid, OpenClaw execution is blocked with a clear corrective message.
+9. In `yd_cowork`, current model behavior remains unchanged.
+10. Agent create and edit flows both expose `Agent Default Model` with text indicating it is OpenClaw-only.
 
 ## Risks
 
-1. Users may still assume the top-left selector is a session-level override if the confirmation or helper text is too subtle.
-2. If model availability changes dynamically, stale Agent model values can become invalid and must fail clearly.
-3. If UI fallback presentation is ambiguous, users may not realize an Agent has no explicit model configured.
+1. If model availability changes dynamically, stale Agent model values can become invalid and must fail clearly.
+2. Historical bare model ids with multiple provider matches require manual user re-selection to become fully explicit.
 
 ## Open Questions Resolved
 

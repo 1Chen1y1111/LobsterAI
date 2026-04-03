@@ -11,6 +11,7 @@ import { RootState } from '../../store';
 import type { Model } from '../../store/slices/modelSlice';
 import type { Agent } from '../../types/agent';
 import type { IMGatewayConfig } from '../../types/im';
+import { resolveOpenClawModelRef, toOpenClawModelRef } from '../../utils/openclawModelRef';
 import { getVisibleIMPlatforms } from '../../utils/regionFilter';
 import Modal from '../common/Modal';
 import TrashIcon from '../icons/TrashIcon';
@@ -62,7 +63,7 @@ const AgentSettingsPanel: React.FC<AgentSettingsPanelProps> = ({ agentId, onClos
         setSystemPrompt(a.systemPrompt);
         setIdentity(a.identity);
         setIcon(a.icon);
-        setModel(availableModels.find((candidate) => candidate.id === a.model) ?? null);
+        setModel(resolveOpenClawModelRef(a.model, availableModels) ?? null);
         setSkillIds(a.skillIds ?? []);
       }
     });
@@ -95,7 +96,7 @@ const AgentSettingsPanel: React.FC<AgentSettingsPanelProps> = ({ agentId, onClos
         description: description.trim(),
         systemPrompt: systemPrompt.trim(),
         identity: identity.trim(),
-        model: model?.id ?? '',
+        model: model ? toOpenClawModelRef(model) : '',
         icon: icon.trim(),
         skillIds,
       });
@@ -425,7 +426,6 @@ const AgentSettingsPanel: React.FC<AgentSettingsPanelProps> = ({ agentId, onClos
                 <ModelSelector
                   value={model}
                   onChange={setModel}
-                  defaultLabel={i18nService.t('agentModelUseGlobalDefault') || 'Use global default model'}
                 />
                 {availableModels.length > 0 && (
                   <p className="mt-1 text-xs text-secondary/70">

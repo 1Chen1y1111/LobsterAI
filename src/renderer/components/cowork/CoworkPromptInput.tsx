@@ -12,6 +12,7 @@ import { setSkills, toggleActiveSkill } from '../../store/slices/skillSlice';
 import { CoworkImageAttachment } from '../../types/cowork';
 import { Skill } from '../../types/skill';
 import { getCompactFolderName } from '../../utils/path';
+import { toOpenClawModelRef } from '../../utils/openclawModelRef';
 import PaperClipIcon from '../icons/PaperClipIcon';
 import XMarkIcon from '../icons/XMarkIcon';
 import ModelSelector from '../ModelSelector';
@@ -166,7 +167,6 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
   const currentAgent = agents.find((agent) => agent.id === currentAgentId);
   const {
     selectedModel: agentSelectedModel,
-    usesFallback: agentModelUsesFallback,
     hasInvalidExplicitModel: agentModelIsInvalid,
   } = resolveAgentModelSelection({
     agentModel: currentAgent?.model ?? '',
@@ -735,25 +735,17 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
                   <div className="flex flex-col items-start gap-1">
                     <ModelSelector
                       dropdownDirection="up"
-                      value={coworkAgentEngine === 'openclaw' ? agentSelectedModel : undefined}
+                      value={coworkAgentEngine === 'openclaw' ? agentSelectedModel : null}
                       onChange={coworkAgentEngine === 'openclaw'
                         ? async (nextModel) => {
-                            if (!currentAgent) return;
-                            const confirmed = window.confirm(i18nService.t('agentModelChangeWarning'));
-                            if (!confirmed) return;
-                            await agentService.updateAgent(currentAgent.id, { model: nextModel?.id ?? '' });
+                            if (!currentAgent || !nextModel) return;
+                            await agentService.updateAgent(currentAgent.id, { model: toOpenClawModelRef(nextModel) });
                           }
                         : undefined}
-                      defaultLabel={i18nService.t('agentModelUseGlobalDefault')}
                     />
                     {coworkAgentEngine === 'openclaw' && agentModelIsInvalid && (
                       <span className="max-w-60 text-[11px] leading-4 text-red-500">
                         {i18nService.t('agentModelInvalidHint')}
-                      </span>
-                    )}
-                    {coworkAgentEngine === 'openclaw' && !agentModelIsInvalid && agentModelUsesFallback && (
-                      <span className="max-w-60 text-[11px] leading-4 text-secondary/70">
-                        {i18nService.t('agentModelFallbackHint')}
                       </span>
                     )}
                   </div>

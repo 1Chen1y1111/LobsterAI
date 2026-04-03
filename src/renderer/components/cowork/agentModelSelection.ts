@@ -1,5 +1,6 @@
 import type { Model } from '../../store/slices/modelSlice';
 import type { CoworkAgentEngine } from '../../types/cowork';
+import { resolveOpenClawModelRef } from '../../utils/openclawModelRef';
 
 type ResolveAgentModelSelectionInput = {
   agentModel: string;
@@ -26,7 +27,7 @@ export function resolveAgentModelSelection({
 
   const normalizedAgentModel = agentModel.trim();
   if (normalizedAgentModel) {
-    const explicitModel = availableModels.find((model) => model.id === normalizedAgentModel) ?? null;
+    const explicitModel = resolveOpenClawModelRef(normalizedAgentModel, availableModels) ?? null;
     if (explicitModel) {
       return { selectedModel: explicitModel, usesFallback: false, hasInvalidExplicitModel: false };
     }
