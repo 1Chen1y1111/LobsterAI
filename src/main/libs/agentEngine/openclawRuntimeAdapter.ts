@@ -4,7 +4,6 @@ import { EventEmitter } from 'events';
 import * as fs from 'fs';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
-import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk';
 import type { CoworkMessage, CoworkSession, CoworkSessionStatus, CoworkExecutionMode, CoworkStore } from '../../coworkStore';
 import {
   OpenClawEngineManager,
@@ -12,6 +11,7 @@ import {
 } from '../openclawEngineManager';
 import type {
   CoworkContinueOptions,
+  PermissionResult,
   CoworkRuntime,
   CoworkRuntimeEvents,
   CoworkStartOptions,

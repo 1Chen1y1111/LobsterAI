@@ -77,7 +77,7 @@ function prependRequireArg(args: string[], scriptPath: string): string[] {
   return ['--require', scriptPath, ...args];
 }
 
-// ── Command resolution (mirrors coworkRunner logic) ──────────────
+// ── Command resolution ────────────────────────────────────────────
 
 interface ResolvedStdioCommand {
   command: string;
