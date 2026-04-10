@@ -32,6 +32,7 @@ export const ProviderName = {
   Minimax: 'minimax',
   Youdaozhiyun: 'youdaozhiyun',
   Qwen: 'qwen',
+  Qianfan: 'qianfan',
   Xiaomi: 'xiaomi',
   StepFun: 'stepfun',
   Volcengine: 'volcengine',
@@ -303,6 +304,20 @@ const PROVIDER_DEFINITIONS = [
         name: 'DeepSeek Reasoner (\u5b89\u5168)',
         supportsImage: false,
       },
+    ],
+  },
+  {
+    id: ProviderName.Qianfan,
+    defaultBaseUrl: 'https://qianfan.baidubce.com/v2',
+    defaultApiFormat: ApiFormat.OpenAI,
+    codingPlanSupported: false,
+    region: 'china',
+    enPriority: 0,
+    defaultModels: [
+      { id: 'deepseek-v3.2', name: 'DeepSeek V3.2', supportsImage: false },
+      { id: 'deepseek-r1', name: 'DeepSeek R1', supportsImage: false },
+      { id: 'ernie-4.5-8k', name: 'ERNIE 4.5 8K', supportsImage: false },
+      { id: 'ernie-4.5-turbo-8k', name: 'ERNIE 4.5 Turbo', supportsImage: false },
     ],
   },
   {

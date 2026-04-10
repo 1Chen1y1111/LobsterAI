@@ -44,6 +44,7 @@ import {
   XiaomiIcon,
   StepfunIcon,
   VolcengineIcon,
+  QianfanIcon,
   OpenRouterIcon,
   OllamaIcon,
   GitHubCopilotIcon,
@@ -85,6 +86,7 @@ const providerKeys = [
   'volcengine',
   'qwen',
   'youdaozhiyun',
+  'qianfan',
   'stepfun',
   'xiaomi',
   'openrouter',
@@ -157,6 +159,7 @@ const providerMeta: Record<ProviderType, { label: string; icon: React.ReactNode 
   youdaozhiyun: { label: 'Youdao', icon: <YouDaoZhiYunIcon /> },
   qwen: { label: 'Qwen', icon: <QwenIcon /> },
   xiaomi: { label: 'Xiaomi', icon: <XiaomiIcon /> },
+  qianfan: { label: 'Qianfan', icon: <QianfanIcon /> },
   stepfun: { label: 'StepFun', icon: <StepfunIcon /> },
   volcengine: { label: 'Volcengine', icon: <VolcengineIcon /> },
   openrouter: { label: 'OpenRouter', icon: <OpenRouterIcon /> },
@@ -267,7 +270,7 @@ const getFixedApiFormatForProvider = (provider: string): 'anthropic' | 'openai' 
   if (provider === 'openai' || provider === 'stepfun') {
     return 'openai';
   }
-  if (provider === 'youdaozhiyun' || provider === 'github-copilot') {
+  if (provider === 'youdaozhiyun' || provider === 'github-copilot' || provider === 'qianfan') {
     return 'openai';
   }
   // Moonshot /anthropic endpoint does not fully implement the Anthropic Messages
