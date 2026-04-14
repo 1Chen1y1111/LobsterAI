@@ -28,13 +28,13 @@ export const mapKeepAliveToSessionReset = (
   switch (keepAlive) {
     case OpenClawSessionKeepAlive.OneDay:
       return { mode: 'idle', idleMinutes: 1440 };
-    case OpenClawSessionKeepAlive.ThirtyDays:
-      return { mode: 'idle', idleMinutes: 43200 };
+    case OpenClawSessionKeepAlive.SevenDays:
+      return { mode: 'idle', idleMinutes: 10080 };
     case OpenClawSessionKeepAlive.OneYear:
       return { mode: 'idle', idleMinutes: 525600 };
-    case OpenClawSessionKeepAlive.SevenDays:
+    case OpenClawSessionKeepAlive.ThirtyDays:
     default:
-      return { mode: 'idle', idleMinutes: 10080 };
+      return { mode: 'idle', idleMinutes: 43200 };
   }
 };
 
@@ -44,13 +44,11 @@ export const buildOpenClawSessionConfig = (
   dmScope: 'per-account-channel-peer';
   reset: { mode: 'idle'; idleMinutes: number };
   maintenance: typeof OPENCLAW_SESSION_MAINTENANCE;
-} => {
-  return {
-    dmScope: 'per-account-channel-peer',
-    reset: mapKeepAliveToSessionReset(policy.keepAlive),
-    maintenance: { ...OPENCLAW_SESSION_MAINTENANCE },
-  };
-};
+} => ({
+  dmScope: 'per-account-channel-peer',
+  reset: mapKeepAliveToSessionReset(policy.keepAlive),
+  maintenance: { ...OPENCLAW_SESSION_MAINTENANCE },
+});
 
 export const loadOpenClawSessionPolicyConfig = (
   store: KeyValueStore,

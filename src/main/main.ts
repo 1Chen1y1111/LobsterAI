@@ -136,6 +136,7 @@ const resolveDefaultAgentModelRef = (): string => {
     modelId: config.model.trim(),
     apiType: config.apiType,
     providerName: apiResolution.providerMetadata?.providerName,
+    authType: apiResolution.providerMetadata?.authType,
     codingPlanEnabled: apiResolution.providerMetadata?.codingPlanEnabled,
     supportsImage: apiResolution.providerMetadata?.supportsImage,
     modelName: apiResolution.providerMetadata?.modelName,
@@ -153,6 +154,7 @@ const buildAvailableOpenClawProviders = (): Record<string, { models: Array<{ id:
         modelId: model.id,
         apiType: provider.apiType,
         providerName: provider.providerName,
+        authType: provider.authType,
         codingPlanEnabled: provider.codingPlanEnabled,
         supportsImage: model.supportsImage,
         modelName: model.name,
@@ -4428,52 +4430,7 @@ if (!gotTheLock) {
     return false;
   });
 
-  // Qwen OAuth 登录
-  ipcMain.handle('qwen:oauth:login', async (event) => {
-    const { startQwenOAuth } = await import('./libs/qwenOAuth');
-
-    const progressCallback = {
-      update: (message: string) => {
-        event.sender.send('qwen:oauth:progress', message);
-      },
-      stop: (message?: string) => {
-        if (message) {
-          event.sender.send('qwen:oauth:progress', message);
-        }
-      }
-    };
-
-    try {
-      const oauthToken = await startQwenOAuth(progressCallback);
-      return {
-        success: true,
-        data: oauthToken
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'OAuth login failed'
-      };
-    }
-  });
-
-  // Qwen OAuth 刷新 token
-  ipcMain.handle('qwen:oauth:refresh', async (_event, refreshToken: string) => {
-    const { refreshQwenOAuthToken } = await import('./libs/qwenOAuth');
-
-    try {
-      const oauthToken = await refreshQwenOAuthToken(refreshToken);
-      return {
-        success: true,
-        data: oauthToken
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Token refresh failed'
-      };
-    }
-  });
+  // ─── end OAuth ───
 
   // 企微 SDK 授权弹窗白名单域名
   const WECOM_AUTH_HOSTNAMES = new Set([
