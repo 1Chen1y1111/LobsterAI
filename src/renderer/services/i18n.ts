@@ -1322,6 +1322,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
     taskFormLeave: '离开',
     taskFormStay: '继续编辑',
 
+    email: '龙虾邮箱',
     // Email Channel
     channelPrefixEmail: '邮件',
     emailSettings: '邮件设置',
@@ -2798,6 +2799,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
     taskFormLeave: 'Leave',
     taskFormStay: 'Keep Editing',
 
+    email: 'clawEmail',
     // Email Channel
     channelPrefixEmail: 'Email',
     emailSettings: 'Email Settings',
