@@ -25,6 +25,7 @@ import {
 import {
   extractGatewayHistoryEntries,
   extractGatewayMessageText,
+  isHeartbeatAckText,
 } from '../openclawHistory';
 import { buildOpenClawLocalTimeContextPrompt } from '../openclawLocalTimeContextPrompt';
 import type {
@@ -2012,6 +2013,14 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     // Also exclude runIds that have already been terminated (lifecycle phase=error received),
     // which prevents gateway retries from spawning new turns and surfacing duplicate errors.
     if (sessionId && !this.activeTurns.has(sessionId) && sessionKey && stream !== 'error' && !this.terminatedRunIds.has(runId)) {
+      // Desktop sessions (lobsterai:*) that were manually stopped must not be
+      // re-activated by late-arriving gateway events (e.g. MCP tool results that
+      // arrive after the user clicked Stop).  Only channel/cron sessions are
+      // allowed to re-create turns after the stop cooldown expires.
+      if (this.manuallyStoppedSessions.has(sessionId) && isManagedSessionKey(sessionKey)) {
+        console.log('[Debug:handleAgentEvent] suppressed — desktop session was manually stopped, sessionId:', sessionId);
+        return;
+      }
       console.log('[Debug:handleAgentEvent] re-creating ActiveTurn for follow-up turn, sessionId:', sessionId);
       this.ensureActiveTurn(sessionId, sessionKey, runId);
     }
@@ -2613,6 +2622,17 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     return normalizedFullText;
   }
 
+  private deleteAssistantMessage(sessionId: string, messageId: string): void {
+    this.clearPendingStoreUpdate(messageId);
+    this.clearPendingMessageUpdate(messageId);
+    this.store.deleteMessage(sessionId, messageId);
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send('cowork:sessions:changed');
+      }
+    }
+  }
+
   /**
    * Process agent assistant-stream text directly from handleGatewayEvent.
    * This bypasses handleAgentEvent's session resolution (which may enqueue events),
@@ -2663,6 +2683,15 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
           'turn:',
           !!turn
         );
+      }
+      return;
+    }
+    if (isHeartbeatAckText(text)) {
+      turn.currentText = text;
+      turn.currentAssistantSegmentText = '';
+      if (turn.assistantMessageId) {
+        this.deleteAssistantMessage(sessionId, turn.assistantMessageId);
+        turn.assistantMessageId = null;
       }
       return;
     }
@@ -2765,6 +2794,10 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     }
 
     if (!streamedText) return;
+    if (isHeartbeatAckText(streamedText)) {
+      turn.currentAssistantSegmentText = '';
+      return;
+    }
     const segmentText = this.resolveAssistantSegmentText(turn, streamedText);
     if (!segmentText) return;
     if (segmentText === previousSegmentText && streamedText === previousText) return;
@@ -2804,6 +2837,19 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
       `finalTextLen=${finalText.length}`,
       `finalText="${truncate(finalText, 200)}"`
     );
+    if (isHeartbeatAckText(finalText)) {
+      turn.currentText = finalText;
+      turn.currentAssistantSegmentText = '';
+      if (turn.assistantMessageId) {
+        this.deleteAssistantMessage(sessionId, turn.assistantMessageId);
+        turn.assistantMessageId = null;
+      }
+      this.store.updateSession(sessionId, { status: 'completed' });
+      this.emit('complete', sessionId, payload.runId ?? turn.runId);
+      this.cleanupSessionTurn(sessionId);
+      this.resolveTurn(sessionId);
+      return;
+    }
     turn.currentText = finalText;
     if (finalText && turn.currentContentBlocks.length === 0) {
       turn.currentContentText = finalText;
@@ -3129,6 +3175,9 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     );
 
     for (const entry of systemEntries) {
+      if (isHeartbeatAckText(entry.text)) {
+        continue;
+      }
       if (existingSystemTexts.has(entry.text)) {
         continue;
       }
@@ -3968,9 +4017,20 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     // `manuallyStoppedSessions` (a permanent Set) would block all future
     // channel events for this session until `runTurn` or `onSessionDeleted`
     // happens to clear it.
+    // Only clear for channel/cron sessions.  Desktop sessions (lobsterai:*)
+    // must stay suppressed — the gateway may still push late MCP tool results
+    // long after the 10s cooldown expires.
     if (this.manuallyStoppedSessions.has(sessionId)) {
-      console.log('[Debug:ensureActiveTurn] cooldown expired, clearing manuallyStoppedSessions for channel re-activation, sessionId:', sessionId);
-      this.manuallyStoppedSessions.delete(sessionId);
+      const isChannel = this.channelSessionSync
+        && !isManagedSessionKey(sessionKey)
+        && this.channelSessionSync.isChannelSessionKey(sessionKey);
+      if (isChannel) {
+        console.log('[Debug:ensureActiveTurn] cooldown expired, clearing manuallyStoppedSessions for channel re-activation, sessionId:', sessionId);
+        this.manuallyStoppedSessions.delete(sessionId);
+      } else {
+        console.log('[Debug:ensureActiveTurn] suppressed — desktop session was manually stopped, sessionId:', sessionId);
+        return;
+      }
     }
     const turnRunId = runId || randomUUID();
     const turnToken = this.nextTurnToken(sessionId);
