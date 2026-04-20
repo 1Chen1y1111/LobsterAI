@@ -223,7 +223,13 @@ const AgentSettingsPanel: React.FC<AgentSettingsPanelProps> = ({ agentId, onClos
     if (isMultiInstancePlatform(platform)) {
       return getConnectedInstances(platform).length > 0;
     }
-    return 'enabled' in imConfig[platform] && imConfig[platform].enabled === true;
+    // email is a multi-instance platform
+    if (platform === 'email') {
+      return imConfig.email.instances.length > 0;
+    }
+    const cfg = imConfig[platform as keyof typeof imConfig];
+    if (!cfg || typeof cfg !== 'object') return false;
+    return 'enabled' in cfg && (cfg as { enabled: boolean }).enabled === true;
   };
 
   /** Resolve agent name by id */

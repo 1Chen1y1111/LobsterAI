@@ -36,6 +36,7 @@ import {
   IMGatewayConfig,
   IMGatewayStatus,
   IMMessage,
+  NimInstanceConfig,
   Platform,
 } from './types';
 
@@ -461,17 +462,18 @@ export class IMGatewayManager extends EventEmitter {
         })),
       },
       discord: discordStatus,
-      nim: (() => {
-        const nmConfig = config.nim;
-        return {
-          connected: Boolean(nmConfig?.enabled && nmConfig.appKey && nmConfig.account && nmConfig.token),
+      nim: {
+        instances: (config.nim?.instances || []).map(inst => ({
+          instanceId: inst.instanceId,
+          instanceName: inst.instanceName,
+          connected: Boolean(inst.enabled && ((inst.nimToken && inst.nimToken.trim()) || (inst.appKey && inst.account && inst.token))),
           startedAt: null as number | null,
           lastError: null as string | null,
-          botAccount: nmConfig?.account || null,
+          botAccount: inst.account || null,
           lastInboundAt: null as number | null,
           lastOutboundAt: null as number | null,
-        };
-      })(),
+        })),
+      },
       'netease-bee': (() => {
         const beeConfig = config['netease-bee'];
         return {
@@ -508,6 +510,19 @@ export class IMGatewayManager extends EventEmitter {
         lastError: null as string | null,
         lastInboundAt: null as number | null,
         lastOutboundAt: null as number | null,
+      },
+      email: {
+        instances: (config.email?.instances || []).map(inst => ({
+          instanceId: inst.instanceId,
+          instanceName: inst.instanceName,
+          connected: Boolean(inst.enabled && inst.email),
+          startedAt: null as number | null,
+          lastError: null as string | null,
+          email: inst.email || null,
+          transport: inst.transport || null,
+          lastInboundAt: null as number | null,
+          lastOutboundAt: null as number | null,
+        })),
       },
     };
   }
@@ -572,6 +587,11 @@ export class IMGatewayManager extends EventEmitter {
           message: 'NetEase Bee channel does not support standalone connectivity testing.',
         }],
       };
+    }
+
+    // Email connectivity test (IMAP login or WS API key validation)
+    if (platform === 'email') {
+      return this.testEmailConnectivity(configOverride);
     }
 
     const config = this.buildMergedConfig(configOverride);
@@ -911,7 +931,8 @@ export class IMGatewayManager extends EventEmitter {
     if (config.popo?.enabled && config.popo?.appKey && config.popo?.appSecret && config.popo?.aesKey && (config.popo.connectionMode === 'websocket' || config.popo.token)) {
       openClawPlatformsToStart.push('popo');
     }
-    if (config.nim?.enabled && config.nim.appKey && config.nim.account && config.nim.token) {
+    const nimInstances = config.nim?.instances || [];
+    if (nimInstances.some(i => i.enabled && ((i.nimToken && i.nimToken.trim()) || (i.appKey && i.account && i.token)))) {
       openClawPlatformsToStart.push('nim');
     }
     if (config['netease-bee']?.enabled && config['netease-bee']?.clientId && config['netease-bee']?.secret) {
@@ -963,7 +984,8 @@ export class IMGatewayManager extends EventEmitter {
     if (platform === 'nim') {
       // NIM runs via OpenClaw; consider it connected when enabled and configured
       const config = this.getConfig();
-      return Boolean(config.nim?.enabled && config.nim.appKey && config.nim.account && config.nim.token);
+      const nimInstances = config.nim?.instances || [];
+      return nimInstances.some(i => i.enabled && ((i.nimToken && i.nimToken.trim()) || (i.appKey && i.account && i.token)));
     }
     if (platform === 'netease-bee') {
       // netease-bee runs via OpenClaw; status comes from OpenClaw
@@ -1617,13 +1639,17 @@ export class IMGatewayManager extends EventEmitter {
     const platform: Platform = 'nim';
 
     const mergedConfig = this.buildMergedConfig(configOverride);
-    const nimConfig = mergedConfig.nim;
+    const nimConfig = (mergedConfig.nim?.instances || []).find((inst) =>
+      Boolean((inst.nimToken && inst.nimToken.trim()) || inst.enabled || inst.appKey || inst.account || inst.token)
+    );
 
-    if (!nimConfig?.appKey || !nimConfig?.account || !nimConfig?.token) {
+    if (!nimConfig || (!nimConfig.nimToken && (!nimConfig.appKey || !nimConfig.account || !nimConfig.token))) {
       const missing: string[] = [];
-      if (!nimConfig?.appKey) missing.push('appKey');
-      if (!nimConfig?.account) missing.push('account');
-      if (!nimConfig?.token) missing.push('token');
+      if (!nimConfig?.nimToken) {
+        if (!nimConfig?.appKey) missing.push('appKey');
+        if (!nimConfig?.account) missing.push('account');
+        if (!nimConfig?.token) missing.push('token');
+      }
       checks.push({
         code: 'missing_credentials',
         level: 'fail',
@@ -1845,10 +1871,15 @@ export class IMGatewayManager extends EventEmitter {
       return config.telegram.botToken ? [] : ['botToken'];
     }
     if (platform === 'nim') {
+      const nimInstances = config.nim?.instances || [];
+      const nimInst = nimInstances.find(i => i.enabled);
+      if (!nimInst) return ['appKey', 'account', 'token'];
       const fields: string[] = [];
-      if (!config.nim.appKey) fields.push('appKey');
-      if (!config.nim.account) fields.push('account');
-      if (!config.nim.token) fields.push('token');
+      if (!nimInst.nimToken) {
+        if (!nimInst.appKey) fields.push('appKey');
+        if (!nimInst.account) fields.push('account');
+        if (!nimInst.token) fields.push('token');
+      }
       return fields;
     }
     if (platform === 'netease-bee') {
@@ -1931,11 +1962,11 @@ export class IMGatewayManager extends EventEmitter {
     }
 
     if (platform === 'nim') {
-      const { appKey, account, token } = config.nim;
-      if (!appKey || !account || !token) {
+      const nimInst = (config.nim?.instances || []).find(i => i.enabled && ((i.nimToken && i.nimToken.trim()) || (i.appKey && i.account && i.token)));
+      if (!nimInst) {
         throw new Error(t('imConfigIncomplete'));
       }
-      return t('imNimConfigReady', { account });
+      return t('imNimConfigReady', { account: nimInst.account });
     }
 
     if (platform === 'netease-bee') {
@@ -2442,7 +2473,7 @@ export class IMGatewayManager extends EventEmitter {
     }
     if (platform === 'dingtalk') return status.dingtalk.instances?.[0]?.startedAt ?? null;
     if (platform === 'telegram') return status.telegram.startedAt;
-    if (platform === 'nim') return status.nim.startedAt;
+    if (platform === 'nim') return status.nim.instances?.[0]?.startedAt ?? null;
     if (platform === 'netease-bee') return status['netease-bee'].startedAt;
     if (platform === 'qq') return status.qq.instances?.[0]?.startedAt ?? null;
     if (platform === 'wecom') return status.wecom.instances?.[0]?.startedAt ?? null;
@@ -2455,7 +2486,7 @@ export class IMGatewayManager extends EventEmitter {
     if (platform === 'dingtalk') return status.dingtalk.instances?.[0]?.lastInboundAt ?? null;
     if (platform === 'feishu') return status.feishu.instances?.[0]?.lastInboundAt ?? null;
     if (platform === 'telegram') return status.telegram.lastInboundAt;
-    if (platform === 'nim') return status.nim.lastInboundAt;
+    if (platform === 'nim') return status.nim.instances?.[0]?.lastInboundAt ?? null;
     if (platform === 'netease-bee') return status['netease-bee'].lastInboundAt;
     if (platform === 'qq') return status.qq.instances?.[0]?.lastInboundAt ?? null;
     if (platform === 'wecom') return status.wecom.instances?.[0]?.lastInboundAt ?? null;
@@ -2468,7 +2499,7 @@ export class IMGatewayManager extends EventEmitter {
     if (platform === 'dingtalk') return status.dingtalk.instances?.[0]?.lastOutboundAt ?? null;
     if (platform === 'feishu') return status.feishu.instances?.[0]?.lastOutboundAt ?? null;
     if (platform === 'telegram') return status.telegram.lastOutboundAt;
-    if (platform === 'nim') return status.nim.lastOutboundAt;
+    if (platform === 'nim') return status.nim.instances?.[0]?.lastOutboundAt ?? null;
     if (platform === 'netease-bee') return status['netease-bee'].lastOutboundAt;
     if (platform === 'qq') return status.qq.instances?.[0]?.lastOutboundAt ?? null;
     if (platform === 'wecom') return status.wecom.instances?.[0]?.lastOutboundAt ?? null;
@@ -2481,7 +2512,7 @@ export class IMGatewayManager extends EventEmitter {
     if (platform === 'dingtalk') return status.dingtalk.instances?.[0]?.lastError ?? null;
     if (platform === 'feishu') return status.feishu.instances?.[0]?.error ?? null;
     if (platform === 'telegram') return status.telegram.lastError;
-    if (platform === 'nim') return status.nim.lastError;
+    if (platform === 'nim') return status.nim.instances?.[0]?.lastError ?? null;
     if (platform === 'netease-bee') return status['netease-bee'].lastError;
     if (platform === 'qq') return status.qq.instances?.[0]?.lastError ?? null;
     if (platform === 'wecom') return status.wecom.instances?.[0]?.lastError ?? null;
@@ -2582,5 +2613,197 @@ export class IMGatewayManager extends EventEmitter {
       return 'warn';
     }
     return 'pass';
+  }
+
+  private async testEmailConnectivity(
+    configOverride?: Partial<IMGatewayConfig>,
+  ): Promise<IMConnectivityTestResult> {
+    const checks: IMConnectivityCheck[] = [];
+    const testedAt = Date.now();
+    const platform: Platform = 'email';
+
+    const mergedConfig = this.buildMergedConfig(configOverride);
+    const emailInstances = mergedConfig.email?.instances || [];
+    const inst = emailInstances.find(i => i.enabled) || emailInstances[0];
+
+    if (!inst) {
+      checks.push({
+        code: 'missing_credentials',
+        level: 'fail',
+        message: t('imMissingCredentials', { fields: 'email' }),
+      });
+      return { platform, testedAt, verdict: 'fail', checks };
+    }
+
+    if (!inst.email) {
+      checks.push({
+        code: 'missing_credentials',
+        level: 'fail',
+        message: t('imMissingCredentials', { fields: 'email address' }),
+      });
+      return { platform, testedAt, verdict: 'fail', checks };
+    }
+
+    if (inst.transport === 'imap') {
+      // IMAP mode: test IMAP login via raw TLS socket
+      const missing: string[] = [];
+      if (!inst.password) missing.push('password');
+      if (!inst.imapHost) missing.push('IMAP host');
+      if (missing.length > 0) {
+        checks.push({
+          code: 'missing_credentials',
+          level: 'fail',
+          message: t('imMissingCredentials', { fields: missing.join(', ') }),
+        });
+        return { platform, testedAt, verdict: 'fail', checks };
+      }
+
+      try {
+        const tls = await import('tls');
+        await new Promise<void>((resolve, reject) => {
+          let greeted = false;
+          let settled = false;
+          const timer = setTimeout(() => {
+            if (!settled) {
+              settled = true;
+              socket.destroy();
+              reject(new Error(t('imAuthProbeTimeout')));
+            }
+          }, CONNECTIVITY_TIMEOUT_MS);
+
+          const socket = tls.connect({
+            host: inst.imapHost,
+            port: inst.imapPort || 993,
+            rejectUnauthorized: true,
+          });
+
+          let buffer = '';
+          socket.on('data', (data: Buffer) => {
+            buffer += data.toString();
+            const lines = buffer.split('\r\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              if (!line) continue;
+
+              // Wait for server greeting before sending LOGIN
+              if (!greeted && line.startsWith('* OK')) {
+                greeted = true;
+                const tag = 'A001';
+                const loginCmd = `${tag} LOGIN "${inst.email}" "${inst.password}"\r\n`;
+                socket.write(loginCmd);
+                continue;
+              }
+
+              // Check LOGIN response
+              if (greeted && line.startsWith('A001')) {
+                clearTimeout(timer);
+                socket.destroy();
+                if (!settled) {
+                  settled = true;
+                  if (line.includes('OK')) {
+                    resolve();
+                  } else {
+                    reject(new Error(line.replace(/^A001\s*/, '')));
+                  }
+                }
+                return;
+              }
+            }
+          });
+
+          socket.on('error', (err: Error) => {
+            clearTimeout(timer);
+            if (!settled) { settled = true; reject(err); }
+          });
+          socket.on('close', () => {
+            clearTimeout(timer);
+            if (!settled) { settled = true; reject(new Error('Connection closed')); }
+          });
+        });
+        checks.push({
+          code: 'auth_check',
+          level: 'pass',
+          message: t('imEmailImapAuthPassed'),
+        });
+      } catch (error: any) {
+        checks.push({
+          code: 'auth_check',
+          level: 'fail',
+          message: `${t('imEmailImapAuthFailed')}: ${error.message}`,
+          suggestion: t('imAuthFailedSuggestion'),
+        });
+        return { platform, testedAt, verdict: 'fail', checks };
+      }
+    } else if (inst.transport === 'ws') {
+      // WS mode: validate API Key by exchanging for IM token
+      if (!inst.apiKey) {
+        checks.push({
+          code: 'missing_credentials',
+          level: 'fail',
+          message: t('imMissingCredentials', { fields: 'API Key' }),
+        });
+        return { platform, testedAt, verdict: 'fail', checks };
+      }
+
+      try {
+        const result = await this.withTimeout(
+          fetchJsonWithTimeout<{ success?: boolean; message?: string; code?: number }>(
+            'https://claw.163.com/claw-api-gateway/open/v1/mail/auth/im-token',
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${inst.apiKey}`,
+              },
+              body: JSON.stringify({ uid: inst.email }),
+            },
+            CONNECTIVITY_TIMEOUT_MS,
+          ),
+          CONNECTIVITY_TIMEOUT_MS,
+          t('imAuthProbeTimeout'),
+        );
+        if (!result.success) {
+          throw new Error(result.message || `API returned code ${result.code}`);
+        }
+        checks.push({
+          code: 'auth_check',
+          level: 'pass',
+          message: t('imEmailWsAuthPassed'),
+        });
+      } catch (error: any) {
+        checks.push({
+          code: 'auth_check',
+          level: 'fail',
+          message: `${t('imAuthFailed', { error: error.message })}`,
+          suggestion: t('imAuthFailedSuggestion'),
+        });
+        return { platform, testedAt, verdict: 'fail', checks };
+      }
+    }
+
+    // Gateway running status
+    const status = this.getStatus();
+    const emailStatus = status.email?.instances?.find(
+      (s: { instanceId: string }) => s.instanceId === inst.instanceId,
+    );
+    const connected = emailStatus?.connected ?? false;
+
+    if (inst.enabled && !connected) {
+      checks.push({
+        code: 'gateway_running',
+        level: 'warn',
+        message: t('imChannelEnabledNotConnected'),
+        suggestion: t('imChannelEnabledNotConnectedSuggestion'),
+      });
+    } else {
+      checks.push({
+        code: 'gateway_running',
+        level: connected ? 'pass' : 'info',
+        message: connected ? t('imChannelRunning') : t('imChannelNotEnabled'),
+      });
+    }
+
+    return { platform, testedAt, verdict: this.calculateVerdict(checks), checks };
   }
 }

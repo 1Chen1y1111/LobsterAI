@@ -415,7 +415,7 @@ export class OpenClawEngineManager extends EventEmitter {
       ...process.env,
       SKILLS_ROOT: skillsRoot,
       LOBSTERAI_SKILLS_ROOT: skillsRoot,
-      OPENCLAW_HOME: runtime.root,
+      OPENCLAW_HOME: this.baseDir,
       OPENCLAW_STATE_DIR: this.stateDir,
       OPENCLAW_CONFIG_PATH: this.configPath,
       OPENCLAW_GATEWAY_TOKEN: token,
@@ -605,7 +605,13 @@ export class OpenClawEngineManager extends EventEmitter {
           path.join(process.cwd(), 'vendor', 'openclaw-runtime', 'current'),
         ];
 
-    const runtimeRoot = findPath(candidateRoots);
+    // Resolve symlinks so the gateway doesn't refuse to traverse them
+    // (e.g. vendor/openclaw-runtime/current -> win-x64).
+    const runtimeRoot = (() => {
+      const found = findPath(candidateRoots);
+      if (!found) return null;
+      try { return fs.realpathSync(found); } catch { return found; }
+    })();
     const expectedPathHint = app.isPackaged
       ? path.join(process.resourcesPath, 'cfmind')
       : path.join(app.getAppPath(), 'vendor', 'openclaw-runtime', 'current');

@@ -2,7 +2,9 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 import { IpcChannel as ScheduledTaskIpc } from '../scheduledTask/constants';
+import { AppUpdateIpc } from '../shared/appUpdate/constants';
 import type { Platform } from '../shared/platform';
+import { NimQrLoginIpc } from './ipcHandlers/nimQrLogin';
 import { OpenClawSessionIpc } from './openclawSession/constants';
 import { OpenClawSessionPolicyIpc } from './openclawSessionPolicy/constants';
 
@@ -328,6 +330,8 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('dialog:saveInlineFile', options),
     readFileAsDataUrl: (filePath: string) =>
       ipcRenderer.invoke('dialog:readFileAsDataUrl', filePath),
+    showMessageBox: (options: { message: string; type?: 'none' | 'info' | 'error' | 'question' | 'warning'; title?: string }) =>
+      ipcRenderer.invoke('dialog:showMessageBox', options),
   },
   shell: {
     openPath: (filePath: string) => ipcRenderer.invoke('shell:openPath', filePath),
@@ -347,13 +351,15 @@ contextBridge.exposeInMainWorld('electron', {
     getSystemLocale: () => ipcRenderer.invoke('app:getSystemLocale'),
   },
   appUpdate: {
-    download: (url: string) => ipcRenderer.invoke('appUpdate:download', url),
-    cancelDownload: () => ipcRenderer.invoke('appUpdate:cancelDownload'),
-    install: (filePath: string) => ipcRenderer.invoke('appUpdate:install', filePath),
-    onDownloadProgress: (callback: (data: any) => void) => {
+    getState: () => ipcRenderer.invoke(AppUpdateIpc.GetState),
+    checkNow: (options?: { manual?: boolean }) => ipcRenderer.invoke(AppUpdateIpc.CheckNow, options),
+    retryDownload: () => ipcRenderer.invoke(AppUpdateIpc.RetryDownload),
+    cancelDownload: () => ipcRenderer.invoke(AppUpdateIpc.CancelDownload),
+    installReady: () => ipcRenderer.invoke(AppUpdateIpc.InstallReady),
+    onStateChanged: (callback: (data: any) => void) => {
       const handler = (_event: any, data: any) => callback(data);
-      ipcRenderer.on('appUpdate:downloadProgress', handler);
-      return () => ipcRenderer.removeListener('appUpdate:downloadProgress', handler);
+      ipcRenderer.on(AppUpdateIpc.StateChanged, handler);
+      return () => ipcRenderer.removeListener(AppUpdateIpc.StateChanged, handler);
     },
   },
   log: {
@@ -401,6 +407,14 @@ contextBridge.exposeInMainWorld('electron', {
     setDingTalkInstanceConfig: (instanceId: string, config: any, options?: { syncGateway?: boolean }) =>
       ipcRenderer.invoke('im:dingtalk:instance:config:set', instanceId, config, options),
 
+    // NIM Multi-Instance
+    addNimInstance: (name: string) => ipcRenderer.invoke('im:nim:instance:add', name),
+    deleteNimInstance: (instanceId: string) => ipcRenderer.invoke('im:nim:instance:delete', instanceId),
+    setNimInstanceConfig: (instanceId: string, config: any, options?: { syncGateway?: boolean }) =>
+      ipcRenderer.invoke('im:nim:instance:config:set', instanceId, config, options),
+    nimQrLoginStart: () => ipcRenderer.invoke(NimQrLoginIpc.Start),
+    nimQrLoginPoll: (uuid: string) => ipcRenderer.invoke(NimQrLoginIpc.Poll, uuid),
+
     // QQ Multi-Instance
     addQQInstance: (name: string) => ipcRenderer.invoke('im:qq:instance:add', name),
     deleteQQInstance: (instanceId: string) => ipcRenderer.invoke('im:qq:instance:delete', instanceId),
@@ -412,6 +426,12 @@ contextBridge.exposeInMainWorld('electron', {
     deleteFeishuInstance: (instanceId: string) => ipcRenderer.invoke('im:feishu:instance:delete', instanceId),
     setFeishuInstanceConfig: (instanceId: string, config: any, options?: { syncGateway?: boolean }) =>
       ipcRenderer.invoke('im:feishu:instance:config:set', instanceId, config, options),
+
+    // Email Multi-Instance
+    addEmailInstance: (name: string) => ipcRenderer.invoke('im:email:instance:add', name),
+    deleteEmailInstance: (instanceId: string) => ipcRenderer.invoke('im:email:instance:delete', instanceId),
+    setEmailInstanceConfig: (instanceId: string, config: any, options?: { syncGateway?: boolean }) =>
+      ipcRenderer.invoke('im:email:instance:config:set', instanceId, config, options),
 
     // WeCom Multi-Instance
     addWecomInstance: (name: string) => ipcRenderer.invoke('im:wecom:instance:add', name),
@@ -455,7 +475,12 @@ contextBridge.exposeInMainWorld('electron', {
 
     // Delivery channels
     listChannels: () => ipcRenderer.invoke(ScheduledTaskIpc.ListChannels),
-    listChannelConversations: (channel: string, accountId?: string) => ipcRenderer.invoke(ScheduledTaskIpc.ListChannelConversations, channel, accountId),
+    listChannelConversations: (channel: string, accountId?: string, filterAccountId?: string) => ipcRenderer.invoke(
+      ScheduledTaskIpc.ListChannelConversations,
+      channel,
+      accountId,
+      filterAccountId,
+    ),
 
     // Stream event listeners
     onStatusUpdate: (callback: (data: any) => void) => {

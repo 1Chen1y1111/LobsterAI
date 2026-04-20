@@ -219,17 +219,32 @@ export interface NimAdvancedConfig {
   mediaMaxMb?: number;
   textChunkLimit?: number;
   debug?: boolean;
+  legacyLogin?: boolean;
+  weblbsUrl?: string;
+  link_web?: string;
+  nos_uploader?: string;
+  nos_downloader_v2?: string;
+  nosSsl?: boolean;
+  nos_accelerate?: string;
+  nos_accelerate_host?: string;
 }
 
-export interface NimConfig {
+export interface NimOpenClawConfig {
   enabled: boolean;
+  nimToken?: string;
   appKey: string;
   account: string;
   token: string;
+  antispamEnabled?: boolean;
   p2p?: NimP2pConfig;
   team?: NimTeamConfig;
   qchat?: NimQChatConfig;
   advanced?: NimAdvancedConfig;
+}
+
+export interface NimInstanceConfig extends NimOpenClawConfig {
+  instanceId: string;
+  instanceName: string;
 }
 
 export interface NimGatewayStatus {
@@ -241,12 +256,30 @@ export interface NimGatewayStatus {
   lastOutboundAt: number | null;
 }
 
+export const MAX_NIM_INSTANCES = 3;
+
+export interface NimInstanceStatus extends NimGatewayStatus {
+  instanceId: string;
+  instanceName: string;
+}
+
+export interface NimMultiInstanceConfig {
+  instances: NimInstanceConfig[];
+}
+
+export interface NimMultiInstanceStatus {
+  instances: NimInstanceStatus[];
+}
+
+/** @deprecated Use NimOpenClawConfig instead. */
+export type NimConfig = NimOpenClawConfig;
+
 // ==================== NeteaseBee (小蜜蜂) Types ====================
 
 export interface NeteaseBeeChanConfig {
   enabled: boolean;
-  clientId: string;    // NIM 登录账号
-  secret: string;      // NIM 登录 token
+  clientId: string; // NIM 登录账号
+  secret: string; // NIM 登录 token
   debug?: boolean;
 }
 
@@ -405,6 +438,79 @@ export interface WeixinGatewayStatus {
   lastOutboundAt: number | null;
 }
 
+// ==================== Email Channel Types ====================
+
+export interface EmailInstanceConfig {
+  instanceId: string; // "email-1", "email-2", etc.
+  instanceName: string; // Display name: "Work Email"
+  enabled: boolean; // Enable/disable this account
+
+  // Transport mode
+  transport: 'imap' | 'ws'; // IMAP/SMTP or WebSocket
+
+  // Account credentials
+  email: string; // user@example.com
+  password?: string; // Required if transport=imap
+  apiKey?: string; // Required if transport=ws (format: ck_*)
+
+  // Agent binding
+  agentId: string; // Agent ID (default: "main")
+
+  // IMAP/SMTP servers (optional, auto-detected if empty)
+  imapHost?: string;
+  imapPort?: number;
+  smtpHost?: string;
+  smtpPort?: number;
+
+  // Security & policy
+  allowFrom?: string[]; // Whitelist: ["user@example.com", "*.trusted.com"]
+
+  // Advanced options
+  replyMode?: 'immediate' | 'accumulated' | 'complete';
+  replyTo?: 'sender' | 'all';
+
+  // Agent-to-Agent collaboration
+  a2aEnabled?: boolean;
+  a2aAgentDomains?: string[];
+  a2aMaxPingPongTurns?: number;
+}
+
+export interface EmailMultiInstanceConfig {
+  instances: EmailInstanceConfig[];
+}
+
+export interface EmailInstanceStatus {
+  instanceId: string;
+  instanceName: string;
+  connected: boolean;
+  startedAt: number | null;
+  lastError: string | null;
+  email: string | null;
+  transport: 'imap' | 'ws' | null;
+  lastInboundAt: number | null;
+  lastOutboundAt: number | null;
+}
+
+export interface EmailMultiInstanceStatus {
+  instances: EmailInstanceStatus[];
+}
+
+export const DEFAULT_EMAIL_INSTANCE_CONFIG: Partial<EmailInstanceConfig> = {
+  enabled: false,
+  transport: 'ws',
+  agentId: 'main',
+  replyMode: 'complete',
+  replyTo: 'sender',
+  a2aEnabled: true,
+  a2aMaxPingPongTurns: 20,
+};
+
+export const DEFAULT_EMAIL_MULTI_INSTANCE_CONFIG: EmailMultiInstanceConfig = {
+  instances: [],
+};
+
+export const MAX_EMAIL_INSTANCES = 5;
+
 // ==================== Common IM Types ====================
 
 export interface IMGatewayConfig {
@@ -413,11 +519,12 @@ export interface IMGatewayConfig {
   telegram: TelegramOpenClawConfig;
   qq: QQMultiInstanceConfig;
   discord: DiscordOpenClawConfig;
-  nim: NimConfig;
+  nim: NimMultiInstanceConfig;
   'netease-bee': NeteaseBeeChanConfig;
   wecom: WecomMultiInstanceConfig;
   popo: PopoOpenClawConfig;
   weixin: WeixinOpenClawConfig;
+  email: EmailMultiInstanceConfig;
   settings: IMSettings;
 }
 
@@ -434,11 +541,12 @@ export interface IMGatewayStatus {
   qq: QQMultiInstanceStatus;
   telegram: TelegramGatewayStatus;
   discord: DiscordGatewayStatus;
-  nim: NimGatewayStatus;
+  nim: NimMultiInstanceStatus;
   'netease-bee': NeteaseBeeChanGatewayStatus;
   wecom: WecomMultiInstanceStatus;
   popo: PopoGatewayStatus;
   weixin: WeixinGatewayStatus;
+  email: EmailMultiInstanceStatus;
 }
 
 // ==================== Media Attachment Types ====================
@@ -447,13 +555,13 @@ export type IMMediaType = 'image' | 'video' | 'audio' | 'voice' | 'document' | '
 
 export interface IMMediaAttachment {
   type: IMMediaType;
-  localPath: string;          // 下载后的本地路径
-  mimeType: string;           // MIME 类型
-  fileName?: string;          // 原始文件名
-  fileSize?: number;          // 文件大小（字节）
-  width?: number;             // 图片/视频宽度
-  height?: number;            // 图片/视频高度
-  duration?: number;          // 音视频时长（秒）
+  localPath: string; // 下载后的本地路径
+  mimeType: string; // MIME 类型
+  fileName?: string; // 原始文件名
+  fileSize?: number; // 文件大小（字节）
+  width?: number; // 图片/视频宽度
+  height?: number; // 图片/视频高度
+  duration?: number; // 音视频时长（秒）
 }
 
 export interface IMMessage {
@@ -462,14 +570,14 @@ export interface IMMessage {
   conversationId: string;
   senderId: string;
   senderName?: string;
-  groupName?: string;         // 群名/频道名（用于会话标题）
+  groupName?: string; // 群名/频道名（用于会话标题）
   content: string;
   chatType: 'direct' | 'group';
   /** 子类型，用于区分同平台不同会话来源，如 'qchat' */
   chatSubType?: string;
   timestamp: number;
   attachments?: IMMediaAttachment[];
-  mediaGroupId?: string;      // 媒体组 ID（用于合并多张图片）
+  mediaGroupId?: string; // 媒体组 ID（用于合并多张图片）
 }
 
 export interface IMReplyContext {
@@ -606,12 +714,21 @@ export const DEFAULT_DISCORD_OPENCLAW_CONFIG: DiscordOpenClawConfig = {
   debug: false,
 };
 
-export const DEFAULT_NIM_CONFIG: NimConfig = {
+export const DEFAULT_NIM_OPENCLAW_CONFIG: NimOpenClawConfig = {
   enabled: false,
+  nimToken: '',
   appKey: '',
   account: '',
   token: '',
+  antispamEnabled: true,
 };
+
+export const DEFAULT_NIM_MULTI_INSTANCE_CONFIG: NimMultiInstanceConfig = {
+  instances: [],
+};
+
+/** @deprecated Use DEFAULT_NIM_OPENCLAW_CONFIG instead. */
+export const DEFAULT_NIM_CONFIG = DEFAULT_NIM_OPENCLAW_CONFIG;
 
 // ==================== NetEase Bee Types ====================
 
@@ -716,11 +833,12 @@ export const DEFAULT_IM_CONFIG: IMGatewayConfig = {
   telegram: DEFAULT_TELEGRAM_OPENCLAW_CONFIG,
   qq: DEFAULT_QQ_MULTI_INSTANCE_CONFIG,
   discord: DEFAULT_DISCORD_OPENCLAW_CONFIG,
-  nim: DEFAULT_NIM_CONFIG,
+  nim: DEFAULT_NIM_MULTI_INSTANCE_CONFIG,
   'netease-bee': DEFAULT_NETEASE_BEE_CONFIG,
   wecom: DEFAULT_WECOM_MULTI_INSTANCE_CONFIG,
   popo: DEFAULT_POPO_CONFIG,
   weixin: DEFAULT_WEIXIN_CONFIG,
+  email: DEFAULT_EMAIL_MULTI_INSTANCE_CONFIG,
   settings: DEFAULT_IM_SETTINGS,
 };
 
@@ -758,6 +876,10 @@ export const DEFAULT_NIM_STATUS: NimGatewayStatus = {
   botAccount: null,
   lastInboundAt: null,
   lastOutboundAt: null,
+};
+
+export const DEFAULT_NIM_MULTI_INSTANCE_STATUS: NimMultiInstanceStatus = {
+  instances: [],
 };
 
 export const DEFAULT_NETEASE_BEE_STATUS: NeteaseBeeChanGatewayStatus = {
@@ -815,11 +937,12 @@ export const DEFAULT_IM_STATUS: IMGatewayStatus = {
   },
   qq: { instances: [] },
   discord: DEFAULT_DISCORD_STATUS,
-  nim: DEFAULT_NIM_STATUS,
+  nim: DEFAULT_NIM_MULTI_INSTANCE_STATUS,
   'netease-bee': DEFAULT_NETEASE_BEE_STATUS,
   wecom: { instances: [] },
   popo: DEFAULT_POPO_STATUS,
   weixin: DEFAULT_WEIXIN_STATUS,
+  email: { instances: [] },
 };
 
 // ==================== Media Marker Types ====================
