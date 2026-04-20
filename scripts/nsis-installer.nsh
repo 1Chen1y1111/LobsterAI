@@ -95,17 +95,18 @@
   System::Call 'Kernel32::SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE", t "")i'
 
   ; ─── Windows Defender Exclusion (optional, best-effort) ───
-  ; Add the OpenClaw runtime directory to Windows Defender exclusions to avoid
-  ; real-time scanning of ~3000 JS/native files during gateway startup.
-  ; This can reduce first-launch time from ~120s to ~10s on Windows.
+  ; Add the install directory and appdata directory to Windows Defender
+  ; exclusions to avoid real-time scanning during startup.
+  ;
+  ; $INSTDIR          — bundled runtime (cfmind ~3000 files), SKILLs, python-win
+  ; $APPDATA\LobsterAI — compile cache, SQLite state, config, logs
   ;
   ; This is a best-effort optimization:
   ; - Requires admin privileges (already elevated for installation)
   ; - Silently skipped if Defender is not running or policy disallows it
-  ; - Only excludes the bundled runtime, not the entire application
   ; - Common practice for developer tools (VS Code, Docker Desktop, etc.)
 
-  nsExec::ExecToStack 'powershell -NoProfile -NonInteractive -Command "try { Add-MpPreference -ExclusionPath $\"$INSTDIR\resources\cfmind$\" -ErrorAction Stop; Write-Output ok } catch { Write-Output skip }"'
+  nsExec::ExecToStack 'powershell -NoProfile -NonInteractive -Command "try { Add-MpPreference -ExclusionPath $\"$INSTDIR$\",$\"$APPDATA\LobsterAI$\" -ErrorAction Stop; Write-Output ok } catch { Write-Output skip }"'
   Pop $0
   Pop $1
   FileWrite $2 "defender-exclusion: exit=$0 result=$1$\r$\n"
@@ -142,8 +143,8 @@
 
 !macro customUnInstall
   ; ─── Remove Windows Defender Exclusion on uninstall ───
-  ; Clean up the exclusion we added during installation.
-  nsExec::ExecToStack 'powershell -NoProfile -NonInteractive -Command "try { Remove-MpPreference -ExclusionPath $\"$INSTDIR\resources\cfmind$\" -ErrorAction SilentlyContinue } catch {}"'
+  ; Clean up the exclusions we added during installation.
+  nsExec::ExecToStack 'powershell -NoProfile -NonInteractive -Command "try { Remove-MpPreference -ExclusionPath $\"$INSTDIR$\",$\"$APPDATA\LobsterAI$\" -ErrorAction SilentlyContinue } catch {}"'
   Pop $0
   Pop $1
 !macroend
