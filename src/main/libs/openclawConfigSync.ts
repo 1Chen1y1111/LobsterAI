@@ -189,6 +189,13 @@ const MANAGED_SKILL_ENTRY_OVERRIDES: Record<string, { enabled: boolean }> = {
   'feishu-cron-reminder': {
     enabled: false,
   },
+  // LobsterAI implements its own MCP integration. The bundled mcporter skill
+  // tries to discover MCP servers via its own CLI, finds none, and produces
+  // confusing "no MCP servers" output. Disable it so users are routed through
+  // LobsterAI's MCP layer instead.
+  'mcporter': {
+    enabled: false,
+  },
 };
 
 const DISABLED_MANAGED_SKILL_NAMES = Object.entries(MANAGED_SKILL_ENTRY_OVERRIDES)
